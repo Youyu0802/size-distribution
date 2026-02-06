@@ -210,6 +210,31 @@ STRINGS = {
     "ca_color_undone":   {"zh": "已撤销颜色点 (剩余 {n} 个)", "en": "Color point undone ({n} remaining)"},
     "ca_no_color_undo":  {"zh": "没有可撤销的颜色点", "en": "No color point to undo"},
     "ca_auto_tol":       {"zh": "自动调整容差",   "en": "Auto Tolerance"},
+
+    # ---- 关于菜单 ----
+    "menu_about":        {"zh": "关于",           "en": "About"},
+    "menu_feedback":     {"zh": "提出建议",       "en": "Feedback"},
+    "menu_licenses":     {"zh": "开源许可",       "en": "Licenses"},
+    "feedback_title":    {"zh": "提出建议",       "en": "Feedback"},
+    "feedback_msg":      {"zh": "如有建议或问题，请发送邮件至:\n\nwangpeijiang0802@gmail.com\n\n感谢您的反馈！",
+                          "en": "For suggestions or issues, please email:\n\nwangpeijiang0802@gmail.com\n\nThank you for your feedback!"},
+    "licenses_title":    {"zh": "开源许可",       "en": "Open Source Licenses"},
+    "licenses_text":     {"zh": "本软件使用了以下开源库:\n\n"
+                                "• Python - PSF License\n"
+                                "• Tkinter - Python License\n"
+                                "• Pillow (PIL) - HPND License\n"
+                                "• NumPy - BSD License\n"
+                                "• SciPy - BSD License\n"
+                                "• Matplotlib - PSF-based License\n\n"
+                                "感谢所有开源贡献者！",
+                          "en": "This software uses the following open source libraries:\n\n"
+                                "• Python - PSF License\n"
+                                "• Tkinter - Python License\n"
+                                "• Pillow (PIL) - HPND License\n"
+                                "• NumPy - BSD License\n"
+                                "• SciPy - BSD License\n"
+                                "• Matplotlib - PSF-based License\n\n"
+                                "Thanks to all open source contributors!"},
 }
 
 
@@ -1206,6 +1231,15 @@ class NanoMeasurer(tk.Tk):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
+        # -- 菜单栏 --
+        self.menubar = tk.Menu(self)
+        self.config(menu=self.menubar)
+
+        self.about_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self._t("menu_about"), menu=self.about_menu)
+        self.about_menu.add_command(label=self._t("menu_feedback"), command=self._show_feedback)
+        self.about_menu.add_command(label=self._t("menu_licenses"), command=self._show_licenses)
+
         # -- 工具栏 --
         self.toolbar = ttk.Frame(self, padding=2)
         self.toolbar.pack(side=tk.TOP, fill=tk.X)
@@ -1309,6 +1343,14 @@ class NanoMeasurer(tk.Tk):
         self.stat_label.pack(anchor=tk.W)
 
     # --------------------------------------------------------- 语言切换
+    def _show_feedback(self):
+        """显示提出建议对话框。"""
+        messagebox.showinfo(self._t("feedback_title"), self._t("feedback_msg"))
+
+    def _show_licenses(self):
+        """显示开源许可对话框。"""
+        messagebox.showinfo(self._t("licenses_title"), self._t("licenses_text"))
+
     def _toggle_lang(self):
         self.lang = "en" if self.lang == "zh" else "zh"
         self._refresh_ui_text()
@@ -1324,6 +1366,11 @@ class NanoMeasurer(tk.Tk):
         self.btn_csv.config(text=self._t("export_csv"))
         self.btn_color.config(text=self._t("color_analysis"))
         self.btn_fit.config(text=self._t("fit_window"))
+
+        # 刷新菜单文本
+        self.menubar.entryconfig(0, label=self._t("menu_about"))
+        self.about_menu.entryconfig(0, label=self._t("menu_feedback"))
+        self.about_menu.entryconfig(1, label=self._t("menu_licenses"))
 
         self.lf_scale.config(text=self._t("scale_info"))
         if self.scale > 0:
