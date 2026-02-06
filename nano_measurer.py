@@ -1,5 +1,5 @@
 """
-Nano Measurer - Python 版本
+Measurement Tool
 从 TEM/SEM 图片中手动测量纳米颗粒粒径并生成分布统计。
 依赖: Pillow, matplotlib, numpy, scipy
 """
@@ -61,10 +61,10 @@ STRINGS = {
     # ---- 右侧面板 ----
     "scale_info":       {"zh": "标尺信息",   "en": "Scale Info"},
     "scale_not_set":    {"zh": "比例尺: 未设定", "en": "Scale: not set"},
-    "scale_fmt":        {"zh": "比例尺: {v:.4f} nm/px", "en": "Scale: {v:.4f} nm/px"},
+    "scale_fmt":        {"zh": "比例尺: {v:.4f} {u}/px", "en": "Scale: {v:.4f} {u}/px"},
     "meas_list":        {"zh": "测量列表",   "en": "Measurements"},
     "col_id":           {"zh": "#",          "en": "#"},
-    "col_diameter":     {"zh": "粒径 (nm)",  "en": "Diameter (nm)"},
+    "col_diameter":     {"zh": "粒径 ({u})",  "en": "Diameter ({u})"},
     "delete_sel":       {"zh": "删除选中",   "en": "Delete"},
     "clear_all":        {"zh": "清空全部",   "en": "Clear All"},
     "statistics":       {"zh": "统计信息",   "en": "Statistics"},
@@ -92,18 +92,19 @@ STRINGS = {
     "scale_too_close":  {"zh": "两点距离过近，请重新点击第二个端点",
                          "en": "Points too close, click the second end again"},
     "scale_dialog_title": {"zh": "标尺校准",  "en": "Scale Calibration"},
-    "scale_dialog_msg": {"zh": "标尺像素长度: {px:.1f} px\n请输入实际距离 (nm):",
-                         "en": "Scale bar length: {px:.1f} px\nEnter actual distance (nm):"},
-    "scale_set_fmt":    {"zh": "标尺已设定: {v:.4f} nm/px",
-                         "en": "Scale set: {v:.4f} nm/px"},
+    "scale_dialog_px":  {"zh": "标尺像素长度: {px:.1f} px", "en": "Scale bar length: {px:.1f} px"},
+    "scale_dialog_val": {"zh": "实际距离:", "en": "Actual distance:"},
+    "scale_dialog_unit": {"zh": "单位:", "en": "Unit:"},
+    "scale_set_fmt":    {"zh": "标尺已设定: {v:.4f} {u}/px",
+                         "en": "Scale set: {v:.4f} {u}/px"},
 
     # ---- 测量 ----
     "meas_click1":      {"zh": "测量: 请点击粒子直径的第一个端点",
                          "en": "Measure: click the first end of the particle diameter"},
     "meas_click2":      {"zh": "测量: 请点击粒子直径的第二个端点",
                          "en": "Measure: click the second end of the particle diameter"},
-    "meas_recorded":    {"zh": "已记录 #{n}: {d:.2f} nm  |  继续点击下一个粒子的第一个端点 (Esc 退出)",
-                         "en": "Recorded #{n}: {d:.2f} nm  |  Click next particle (Esc to exit)"},
+    "meas_recorded":    {"zh": "已记录 #{n}: {d:.2f} {u}  |  继续点击下一个粒子 (Esc 退出)",
+                         "en": "Recorded #{n}: {d:.2f} {u}  |  Click next particle (Esc to exit)"},
 
     # ---- 撤销/取消 ----
     "undo_click":       {"zh": "已撤销当前点击", "en": "Current click undone"},
@@ -222,7 +223,7 @@ STRINGS = {
     "menu_licenses":     {"zh": "开源许可",       "en": "Licenses"},
     "menu_help":         {"zh": "使用说明",       "en": "User Guide"},
     "help_title":        {"zh": "使用说明",       "en": "User Guide"},
-    "help_text":         {"zh": "【Nano Measurer 使用说明】\n\n"
+    "help_text":         {"zh": "【Measurement Tool 使用说明】\n\n"
                                 "1. 打开图片\n"
                                 "   点击「文件 → 打开图片」加载 TEM/SEM 图像\n\n"
                                 "2. 设定标尺\n"
@@ -242,7 +243,7 @@ STRINGS = {
                                 "• 滚轮：缩放图片\n"
                                 "• Ctrl+Z：撤销\n"
                                 "• Delete：删除选中测量",
-                          "en": "【Nano Measurer User Guide】\n\n"
+                          "en": "【Measurement Tool User Guide】\n\n"
                                 "1. Open Image\n"
                                 "   File → Open Image to load TEM/SEM image\n\n"
                                 "2. Set Scale\n"
@@ -283,6 +284,74 @@ STRINGS = {
                                 "• Matplotlib - PSF-based License\n\n"
                                 "Thanks to all open source contributors!"},
 }
+
+
+# ---------------------------------------------------------------------------
+# 标尺校准对话框
+# ---------------------------------------------------------------------------
+
+class ScaleDialog(tk.Toplevel):
+    """带单位选择的标尺校准对话框"""
+    def __init__(self, parent, title, px_info, val_label, unit_label, units, default_unit="nm"):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+        self.result_unit = None
+
+        # 像素长度信息
+        ttk.Label(self, text=px_info).pack(padx=20, pady=(15, 10))
+
+        # 输入框和单位选择
+        input_frame = ttk.Frame(self)
+        input_frame.pack(padx=20, pady=5)
+
+        ttk.Label(input_frame, text=val_label).pack(side=tk.LEFT)
+        self.entry = ttk.Entry(input_frame, width=12)
+        self.entry.pack(side=tk.LEFT, padx=(5, 10))
+        self.entry.focus_set()
+
+        ttk.Label(input_frame, text=unit_label).pack(side=tk.LEFT)
+        self.unit_var = tk.StringVar(value=default_unit)
+        self.unit_combo = ttk.Combobox(input_frame, textvariable=self.unit_var,
+                                        values=units, width=6, state="readonly")
+        self.unit_combo.pack(side=tk.LEFT, padx=5)
+
+        # 按钮
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(pady=15)
+        ttk.Button(btn_frame, text="OK", command=self._on_ok, width=8).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=self._on_cancel, width=8).pack(side=tk.LEFT, padx=5)
+
+        self.bind("<Return>", lambda e: self._on_ok())
+        self.bind("<Escape>", lambda e: self._on_cancel())
+
+        # 居中显示
+        self.update_idletasks()
+        w, h = self.winfo_width(), self.winfo_height()
+        x = parent.winfo_x() + (parent.winfo_width() - w) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - h) // 2
+        self.geometry(f"+{x}+{y}")
+
+        self.wait_window(self)
+
+    def _on_ok(self):
+        try:
+            val = float(self.entry.get())
+            if val <= 0:
+                raise ValueError
+            self.result = val
+            self.result_unit = self.unit_var.get()
+            self.destroy()
+        except ValueError:
+            self.entry.focus_set()
+            self.entry.select_range(0, tk.END)
+
+    def _on_cancel(self):
+        self.result = None
+        self.result_unit = None
+        self.destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -1231,7 +1300,7 @@ class ColorAnalysisWindow(tk.Toplevel):
 class NanoMeasurer(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Nano Measurer")
+        self.title("Measurement Tool")
         self.geometry("1200x800")
         self.minsize(900, 600)
 
@@ -1249,6 +1318,8 @@ class NanoMeasurer(tk.Tk):
         self.offset_y = 0.0
 
         self.scale = 0.0
+        self.unit = "nm"  # 当前单位
+        self.units = ["nm", "μm", "mm", "Å"]  # 可选单位
         self.mode = "idle"
         self.click_pt = None
 
@@ -1468,13 +1539,13 @@ class NanoMeasurer(tk.Tk):
 
         self.lf_scale.config(text=self._t("scale_info"))
         if self.scale > 0:
-            self.scale_label.config(text=self._t("scale_fmt", v=self.scale))
+            self.scale_label.config(text=self._t("scale_fmt", v=self.scale, u=self.unit))
         else:
             self.scale_label.config(text=self._t("scale_not_set"))
 
         self.lf_list.config(text=self._t("meas_list"))
         self.tree.heading("col_id", text=self._t("col_id"))
-        self.tree.heading("col_diameter", text=self._t("col_diameter"))
+        self.tree.heading("col_diameter", text=self._t("col_diameter", u=self.unit))
         self.btn_del.config(text=self._t("delete_sel"))
         self.btn_clear.config(text=self._t("clear_all"))
 
@@ -1532,7 +1603,7 @@ class NanoMeasurer(tk.Tk):
 
         self.pil_image = img
         self.img_w, self.img_h = img.size
-        self.title(f"Nano Measurer - {os.path.basename(path)}")
+        self.title(f"Measurement Tool - {os.path.basename(path)}")
 
         self.measurements.clear()
         self.undo_stack.clear()
@@ -1750,25 +1821,23 @@ class NanoMeasurer(tk.Tk):
                 self.status_var.set(self._t("scale_too_close"))
                 return
 
-            nm_str = simpledialog.askstring(
+            dlg = ScaleDialog(
+                self,
                 self._t("scale_dialog_title"),
-                self._t("scale_dialog_msg", px=dist_px),
-                parent=self,
+                self._t("scale_dialog_px", px=dist_px),
+                self._t("scale_dialog_val"),
+                self._t("scale_dialog_unit"),
+                self.units,
+                self.unit
             )
-            if nm_str is None:
-                self.cancel_mode()
-                return
-            try:
-                nm_val = float(nm_str)
-                if nm_val <= 0:
-                    raise ValueError
-            except ValueError:
-                messagebox.showerror(self._t("error"), self._t("positive_number"))
+            if dlg.result is None:
                 self.cancel_mode()
                 return
 
-            self.scale = nm_val / dist_px
-            self.scale_label.config(text=self._t("scale_fmt", v=self.scale))
+            self.unit = dlg.result_unit
+            self.scale = dlg.result / dist_px
+            self.scale_label.config(text=self._t("scale_fmt", v=self.scale, u=self.unit))
+            self._update_column_header()
 
             for m in self.measurements:
                 m.nm_dist = m.pixel_dist * self.scale
@@ -1779,7 +1848,11 @@ class NanoMeasurer(tk.Tk):
             self.canvas.config(cursor="")
             self.canvas.delete("rubber")
             self._render()
-            self.status_var.set(self._t("scale_set_fmt", v=self.scale))
+            self.status_var.set(self._t("scale_set_fmt", v=self.scale, u=self.unit))
+
+    def _update_column_header(self):
+        """更新列表标题以显示当前单位"""
+        self.tree.heading("col_diameter", text=self._t("col_diameter", u=self.unit))
 
     # --------------------------------------------------------- 粒径测量
     def start_measure(self):
@@ -1814,7 +1887,7 @@ class NanoMeasurer(tk.Tk):
             self.click_pt = None
             self.canvas.delete("rubber")
             self.status_var.set(self._t("meas_recorded",
-                                        n=len(self.measurements), d=m.nm_dist))
+                                        n=len(self.measurements), d=m.nm_dist, u=self.unit))
 
     # --------------------------------------------------------- 颜色分析 (取色)
     def start_pick_color(self):
