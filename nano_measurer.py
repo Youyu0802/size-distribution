@@ -149,6 +149,13 @@ STRINGS = {
     "csv_min":          {"zh": "最小值",     "en": "Min"},
     "csv_max":          {"zh": "最大值",     "en": "Max"},
     "csv_scale":        {"zh": "比例尺 (nm/px)", "en": "Scale (nm/px)"},
+    "csv_gauss_title":  {"zh": "高斯拟合",     "en": "Gaussian Fit"},
+    "csv_gauss_formula":{"zh": "公式",         "en": "Formula"},
+    "csv_gauss_mu":     {"zh": "μ (均值)",     "en": "μ (Mean)"},
+    "csv_gauss_sigma":  {"zh": "σ (标准差)",   "en": "σ (Std Dev)"},
+    "csv_gauss_curve":  {"zh": "拟合曲线数据", "en": "Fit Curve Data"},
+    "csv_gauss_x":      {"zh": "X ({u})",      "en": "X ({u})"},
+    "csv_gauss_y":      {"zh": "Y (概率密度)", "en": "Y (Density)"},
 
     # ---- 颜色分析 ----
     "color_analysis":       {"zh": "颜色分析",       "en": "Color Analysis"},
@@ -1309,6 +1316,26 @@ class ColorAnalysisWindow(tk.Toplevel):
                 if has_scale:
                     writer.writerow([self._t("csv_scale"), f"{self.app.scale:.6f}"])
 
+                # ---- 高斯拟合 ----
+                if n > 1 and std_val > 0:
+                    writer.writerow([])
+                    writer.writerow([self._t("csv_gauss_title")])
+                    writer.writerow([self._t("csv_gauss_formula"),
+                                     "f(x) = (1/(σ√(2π))) × exp(-(x-μ)²/(2σ²))"])
+                    writer.writerow([self._t("csv_gauss_mu"), f"{mean:.4f}"])
+                    writer.writerow([self._t("csv_gauss_sigma"), f"{std_val:.4f}"])
+
+                    writer.writerow([])
+                    vals_arr = np.array(vals)
+                    x_fit = np.linspace(vals_arr.min() - std_val,
+                                        vals_arr.max() + std_val, 200)
+                    y_fit = norm.pdf(x_fit, mean, std_val)
+                    writer.writerow([self._t("csv_gauss_curve")])
+                    writer.writerow([self._t("csv_gauss_x", u=unit),
+                                     self._t("csv_gauss_y")])
+                    for xv, yv in zip(x_fit, y_fit):
+                        writer.writerow([f"{xv:.4f}", f"{yv:.6f}"])
+
             self.app.status_var.set(self._t("ca_exported_fmt", p=path))
         except Exception as exc:
             messagebox.showerror(self._t("export_fail"), str(exc))
@@ -2122,6 +2149,26 @@ class NanoMeasurer(tk.Tk):
                 writer.writerow([self._t("csv_max"), f"{max(vals):.4f}"])
                 if self.scale > 0:
                     writer.writerow([self._t("csv_scale"), f"{self.scale:.6f}"])
+
+                # ---- 高斯拟合 ----
+                if n > 1 and std_val > 0:
+                    writer.writerow([])
+                    writer.writerow([self._t("csv_gauss_title")])
+                    writer.writerow([self._t("csv_gauss_formula"),
+                                     "f(x) = (1/(σ√(2π))) × exp(-(x-μ)²/(2σ²))"])
+                    writer.writerow([self._t("csv_gauss_mu"), f"{mean:.4f}"])
+                    writer.writerow([self._t("csv_gauss_sigma"), f"{std_val:.4f}"])
+
+                    writer.writerow([])
+                    vals_arr = np.array(vals)
+                    x_fit = np.linspace(vals_arr.min() - std_val,
+                                        vals_arr.max() + std_val, 200)
+                    y_fit = norm.pdf(x_fit, mean, std_val)
+                    writer.writerow([self._t("csv_gauss_curve")])
+                    writer.writerow([self._t("csv_gauss_x", u=unit),
+                                     self._t("csv_gauss_y")])
+                    for xv, yv in zip(x_fit, y_fit):
+                        writer.writerow([f"{xv:.4f}", f"{yv:.6f}"])
 
             self.status_var.set(self._t("exported_fmt", p=path))
         except Exception as exc:
