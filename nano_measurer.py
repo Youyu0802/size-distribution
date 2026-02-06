@@ -211,8 +211,13 @@ STRINGS = {
     "ca_no_color_undo":  {"zh": "没有可撤销的颜色点", "en": "No color point to undo"},
     "ca_auto_tol":       {"zh": "自动调整容差",   "en": "Auto Tolerance"},
 
-    # ---- 关于菜单 ----
+    # ---- 菜单栏 ----
+    "menu_file":         {"zh": "文件",           "en": "File"},
+    "menu_view":         {"zh": "视图",           "en": "View"},
+    "menu_tools":        {"zh": "工具",           "en": "Tools"},
     "menu_about":        {"zh": "关于",           "en": "About"},
+    "menu_zoom_100":     {"zh": "实际大小 (1:1)", "en": "Actual Size (1:1)"},
+    "menu_language":     {"zh": "切换语言",       "en": "Switch Language"},
     "menu_feedback":     {"zh": "提出建议",       "en": "Feedback"},
     "menu_licenses":     {"zh": "开源许可",       "en": "Licenses"},
     "feedback_title":    {"zh": "提出建议",       "en": "Feedback"},
@@ -1235,6 +1240,30 @@ class NanoMeasurer(tk.Tk):
         self.menubar = tk.Menu(self)
         self.config(menu=self.menubar)
 
+        # 文件菜单
+        self.file_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self._t("menu_file"), menu=self.file_menu)
+        self.file_menu.add_command(label=self._t("open_image"), command=self.open_image)
+        self.file_menu.add_command(label=self._t("export_csv"), command=self.export_csv)
+
+        # 视图菜单
+        self.view_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self._t("menu_view"), menu=self.view_menu)
+        self.view_menu.add_command(label=self._t("fit_window"), command=self.fit_to_window)
+        self.view_menu.add_command(label=self._t("menu_zoom_100"), command=self.zoom_100)
+        self.view_menu.add_separator()
+        self.view_menu.add_command(label=self._t("menu_language"), command=self._toggle_lang)
+
+        # 工具菜单
+        self.tools_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label=self._t("menu_tools"), menu=self.tools_menu)
+        self.tools_menu.add_command(label=self._t("set_scale"), command=self.start_set_scale)
+        self.tools_menu.add_command(label=self._t("measure"), command=self.start_measure)
+        self.tools_menu.add_command(label=self._t("distribution"), command=self.show_histogram)
+        self.tools_menu.add_separator()
+        self.tools_menu.add_command(label=self._t("color_analysis"), command=self.start_pick_color)
+
+        # 关于菜单
         self.about_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=self._t("menu_about"), menu=self.about_menu)
         self.about_menu.add_command(label=self._t("menu_feedback"), command=self._show_feedback)
@@ -1368,7 +1397,23 @@ class NanoMeasurer(tk.Tk):
         self.btn_fit.config(text=self._t("fit_window"))
 
         # 刷新菜单文本
-        self.menubar.entryconfig(0, label=self._t("menu_about"))
+        self.menubar.entryconfig(0, label=self._t("menu_file"))
+        self.menubar.entryconfig(1, label=self._t("menu_view"))
+        self.menubar.entryconfig(2, label=self._t("menu_tools"))
+        self.menubar.entryconfig(3, label=self._t("menu_about"))
+
+        self.file_menu.entryconfig(0, label=self._t("open_image"))
+        self.file_menu.entryconfig(1, label=self._t("export_csv"))
+
+        self.view_menu.entryconfig(0, label=self._t("fit_window"))
+        self.view_menu.entryconfig(1, label=self._t("menu_zoom_100"))
+        self.view_menu.entryconfig(3, label=self._t("menu_language"))
+
+        self.tools_menu.entryconfig(0, label=self._t("set_scale"))
+        self.tools_menu.entryconfig(1, label=self._t("measure"))
+        self.tools_menu.entryconfig(2, label=self._t("distribution"))
+        self.tools_menu.entryconfig(4, label=self._t("color_analysis"))
+
         self.about_menu.entryconfig(0, label=self._t("menu_feedback"))
         self.about_menu.entryconfig(1, label=self._t("menu_licenses"))
 
