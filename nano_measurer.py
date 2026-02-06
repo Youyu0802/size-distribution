@@ -424,7 +424,8 @@ def _rgb_to_hsv_array(rgb: np.ndarray) -> np.ndarray:
     h = h / 2.0  # 0-360 → 0-180
 
     # Saturation
-    s = np.where(cmax > 0, delta / cmax, 0.0) * 255.0
+    safe_cmax = np.where(cmax > 0, cmax, 1.0)
+    s = np.where(cmax > 0, delta / safe_cmax, 0.0) * 255.0
 
     # Value
     v = cmax * 255.0
