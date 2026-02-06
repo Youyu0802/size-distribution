@@ -283,6 +283,27 @@ STRINGS = {
                                 "• SciPy - BSD License\n"
                                 "• Matplotlib - PSF-based License\n\n"
                                 "Thanks to all open source contributors!"},
+    "menu_disclaimer":   {"zh": "免责声明",       "en": "Disclaimer"},
+    "disclaimer_title":  {"zh": "免责声明",       "en": "Disclaimer"},
+    "disclaimer_text":   {"zh": "【免责声明】\n\n"
+                                "本软件按「原样」提供，不提供任何明示或暗示的保证，\n"
+                                "包括但不限于对适销性、特定用途适用性和非侵权性的保证。\n\n"
+                                "在任何情况下，作者或版权持有人均不对因使用本软件\n"
+                                "或与本软件相关的任何索赔、损害或其他责任负责。\n\n"
+                                "使用本软件即表示您同意上述条款。\n\n"
+                                "© 2025 Peijiang Wang\n"
+                                "联系方式: wangpeijiang0802@gmail.com",
+                          "en": "【DISCLAIMER】\n\n"
+                                "This software is provided \"as is\", without warranty of any kind,\n"
+                                "express or implied, including but not limited to the warranties\n"
+                                "of merchantability, fitness for a particular purpose and\n"
+                                "noninfringement.\n\n"
+                                "In no event shall the authors or copyright holders be liable\n"
+                                "for any claim, damages or other liability arising from the use\n"
+                                "of this software.\n\n"
+                                "By using this software, you agree to these terms.\n\n"
+                                "© 2025 Peijiang Wang\n"
+                                "Contact: wangpeijiang0802@gmail.com"},
 }
 
 
@@ -1383,6 +1404,7 @@ class NanoMeasurer(tk.Tk):
         self.about_menu.add_separator()
         self.about_menu.add_command(label=self._t("menu_feedback"), command=self._show_feedback)
         self.about_menu.add_command(label=self._t("menu_licenses"), command=self._show_licenses)
+        self.about_menu.add_command(label=self._t("menu_disclaimer"), command=self._show_disclaimer)
 
         # -- 工具栏 --
         self.toolbar = ttk.Frame(self, padding=2)
@@ -1499,6 +1521,10 @@ class NanoMeasurer(tk.Tk):
         """显示开源许可对话框。"""
         messagebox.showinfo(self._t("licenses_title"), self._t("licenses_text"))
 
+    def _show_disclaimer(self):
+        """显示免责声明对话框。"""
+        messagebox.showinfo(self._t("disclaimer_title"), self._t("disclaimer_text"))
+
     def _toggle_lang(self):
         self.lang = "en" if self.lang == "zh" else "zh"
         self._refresh_ui_text()
@@ -1531,6 +1557,7 @@ class NanoMeasurer(tk.Tk):
         self.about_menu.entryconfig(0, label=self._t("menu_help"))
         self.about_menu.entryconfig(2, label=self._t("menu_feedback"))
         self.about_menu.entryconfig(3, label=self._t("menu_licenses"))
+        self.about_menu.entryconfig(4, label=self._t("menu_disclaimer"))
 
         self.lf_scale.config(text=self._t("scale_info"))
         if self.scale > 0:
