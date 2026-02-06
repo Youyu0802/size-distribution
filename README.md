@@ -14,7 +14,7 @@ A desktop application for measuring nanoparticle sizes from TEM/SEM images.
 - **Particle Measurement** - Click to measure particle diameters
 - **Size Distribution** - Generate histograms with Gaussian fitting
 - **Color Analysis** - Automatic particle detection by color
-- **Data Export** - Export measurements to CSV
+- **Data Export** - Export measurements to CSV with Gaussian fit curve & formula
 - **Bilingual UI** - Chinese/English interface
 
 ---
@@ -23,7 +23,7 @@ A desktop application for measuring nanoparticle sizes from TEM/SEM images.
 - **粒径测量** - 点击测量颗粒直径
 - **粒径分布** - 生成直方图并进行高斯拟合
 - **颜色分析** - 基于颜色自动识别颗粒
-- **数据导出** - 导出测量数据为 CSV
+- **数据导出** - 导出测量数据为 CSV，含高斯拟合曲线及公式
 - **双语界面** - 中文/英文切换
 
 ## Screenshots / 截图
@@ -59,6 +59,26 @@ python nano_measurer.py
 3. **Measure** - Tools → Measure, click particle diameter endpoints (点击颗粒直径两端测量)
 4. **View Distribution** - Tools → Distribution (查看粒径分布)
 5. **Export Data** - File → Export CSV (导出数据)
+
+### CSV Export Content / CSV 导出内容
+
+The exported CSV includes:
+
+| Section | Content |
+|---------|---------|
+| Raw Data | Index, diameter/area, pixel distance, coordinates |
+| Statistics | Count, mean, std, min, max, scale |
+| Gaussian Fit | Formula: `f(x) = (1/(σ√(2π))) × exp(-(x-μ)²/(2σ²))`, μ, σ values |
+| Fit Curve | 200 data points (X, Y) for re-plotting in Excel/Origin |
+
+导出的 CSV 文件包含：
+
+| 区域 | 内容 |
+|------|------|
+| 原始数据 | 序号、粒径/面积、像素距离、坐标 |
+| 统计量 | 计数、均值、标准差、最小值、最大值、比例尺 |
+| 高斯拟合 | 公式: `f(x) = (1/(σ√(2π))) × exp(-(x-μ)²/(2σ²))`、μ、σ 值 |
+| 拟合曲线 | 200 个数据点 (X, Y)，可在 Excel/Origin 中重绘 |
 
 ### Shortcuts / 快捷键
 
