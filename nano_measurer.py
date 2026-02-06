@@ -101,10 +101,14 @@ STRINGS = {
     # ---- 测量 ----
     "meas_click1":      {"zh": "测量: 请点击粒子直径的第一个端点",
                          "en": "Measure: click the first end of the particle diameter"},
-    "meas_click2":      {"zh": "测量: 请点击粒子直径的第二个端点",
-                         "en": "Measure: click the second end of the particle diameter"},
+    "meas_click2":      {"zh": "测量: 请点击第二个端点 (右键取消)",
+                         "en": "Measure: click the second end (right-click to cancel)"},
     "meas_recorded":    {"zh": "已记录 #{n}: {d:.2f} {u}  |  继续点击下一个粒子 (Esc 退出)",
                          "en": "Recorded #{n}: {d:.2f} {u}  |  Click next particle (Esc to exit)"},
+    "meas_cancelled":   {"zh": "已取消当前测量，请重新点击第一个端点",
+                         "en": "Cancelled. Click the first endpoint again."},
+    "meas_50_reached":  {"zh": "已达到 {n} 个测量点！",
+                         "en": "{n} measurements reached!"},
 
     # ---- 撤销/取消 ----
     "undo_click":       {"zh": "已撤销当前点击", "en": "Current click undone"},
@@ -1376,6 +1380,7 @@ class NanoMeasurer(tk.Tk):
         self.undo_stack: list[Measurement] = []
 
         self._pan_start = None
+        self._right_press_pos = None
         self._rubber_line = None
         self._rubber_text = None
 
@@ -1712,6 +1717,7 @@ class NanoMeasurer(tk.Tk):
         self._render()
 
     def _on_right_press(self, event):
+        self._right_press_pos = (event.x, event.y)
         self._pan_start = (event.x, event.y, self.offset_x, self.offset_y)
 
     def _on_right_drag(self, event):
@@ -1724,6 +1730,14 @@ class NanoMeasurer(tk.Tk):
 
     def _on_right_release(self, event):
         self._pan_start = None
+        if (self._right_press_pos is not None
+                and abs(event.x - self._right_press_pos[0]) < 5
+                and abs(event.y - self._right_press_pos[1]) < 5):
+            if self.mode == "measure" and self.click_pt is not None:
+                self.click_pt = None
+                self.canvas.delete("rubber")
+                self.status_var.set(self._t("meas_cancelled"))
+        self._right_press_pos = None
 
     # --------------------------------------------------------- 坐标转换
     def _canvas_to_img(self, cx, cy):
@@ -1936,8 +1950,12 @@ class NanoMeasurer(tk.Tk):
 
             self.click_pt = None
             self.canvas.delete("rubber")
+            n_meas = len(self.measurements)
             self.status_var.set(self._t("meas_recorded",
-                                        n=len(self.measurements), d=m.nm_dist, u=self.unit))
+                                        n=n_meas, d=m.nm_dist, u=self.unit))
+            if n_meas % 50 == 0:
+                messagebox.showinfo(self._t("hist_title"),
+                                    self._t("meas_50_reached", n=n_meas))
 
     # --------------------------------------------------------- 颜色分析 (取色)
     def start_pick_color(self):
