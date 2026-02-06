@@ -220,6 +220,48 @@ STRINGS = {
     "menu_language":     {"zh": "切换语言",       "en": "Switch Language"},
     "menu_feedback":     {"zh": "提出建议",       "en": "Feedback"},
     "menu_licenses":     {"zh": "开源许可",       "en": "Licenses"},
+    "menu_help":         {"zh": "使用说明",       "en": "User Guide"},
+    "help_title":        {"zh": "使用说明",       "en": "User Guide"},
+    "help_text":         {"zh": "【Nano Measurer 使用说明】\n\n"
+                                "1. 打开图片\n"
+                                "   点击「文件 → 打开图片」加载 TEM/SEM 图像\n\n"
+                                "2. 设定标尺\n"
+                                "   点击「工具 → 设定标尺」，在图片标尺两端各点击一次，\n"
+                                "   输入标尺的实际长度（nm）\n\n"
+                                "3. 测量粒径\n"
+                                "   点击「工具 → 测量」，在纳米颗粒直径两端点击，\n"
+                                "   程序自动记录粒径，按 Esc 退出测量\n\n"
+                                "4. 查看分布\n"
+                                "   点击「工具 → 粒径分布」查看直方图和高斯拟合\n\n"
+                                "5. 导出数据\n"
+                                "   点击「文件 → 导出 CSV」保存测量数据\n\n"
+                                "6. 颜色分析\n"
+                                "   点击「工具 → 颜色分析」进行颗粒识别和面积统计\n\n"
+                                "【快捷操作】\n"
+                                "• 右键拖拽：平移图片\n"
+                                "• 滚轮：缩放图片\n"
+                                "• Ctrl+Z：撤销\n"
+                                "• Delete：删除选中测量",
+                          "en": "【Nano Measurer User Guide】\n\n"
+                                "1. Open Image\n"
+                                "   File → Open Image to load TEM/SEM image\n\n"
+                                "2. Set Scale\n"
+                                "   Tools → Set Scale, click both ends of scale bar,\n"
+                                "   enter actual length (nm)\n\n"
+                                "3. Measure Particles\n"
+                                "   Tools → Measure, click both ends of each particle,\n"
+                                "   press Esc to exit\n\n"
+                                "4. View Distribution\n"
+                                "   Tools → Distribution for histogram & Gaussian fit\n\n"
+                                "5. Export Data\n"
+                                "   File → Export CSV to save measurements\n\n"
+                                "6. Color Analysis\n"
+                                "   Tools → Color Analysis for particle detection\n\n"
+                                "【Shortcuts】\n"
+                                "• Right-drag: Pan\n"
+                                "• Scroll: Zoom\n"
+                                "• Ctrl+Z: Undo\n"
+                                "• Delete: Remove selected"},
     "feedback_title":    {"zh": "提出建议",       "en": "Feedback"},
     "feedback_msg":      {"zh": "如有建议或问题，请发送邮件至:\n\nwangpeijiang0802@gmail.com\n\n感谢您的反馈！",
                           "en": "For suggestions or issues, please email:\n\nwangpeijiang0802@gmail.com\n\nThank you for your feedback!"},
@@ -1266,6 +1308,8 @@ class NanoMeasurer(tk.Tk):
         # 关于菜单
         self.about_menu = tk.Menu(self.menubar, tearoff=0)
         self.menubar.add_cascade(label=self._t("menu_about"), menu=self.about_menu)
+        self.about_menu.add_command(label=self._t("menu_help"), command=self._show_help)
+        self.about_menu.add_separator()
         self.about_menu.add_command(label=self._t("menu_feedback"), command=self._show_feedback)
         self.about_menu.add_command(label=self._t("menu_licenses"), command=self._show_licenses)
 
@@ -1372,6 +1416,10 @@ class NanoMeasurer(tk.Tk):
         self.stat_label.pack(anchor=tk.W)
 
     # --------------------------------------------------------- 语言切换
+    def _show_help(self):
+        """显示使用说明对话框。"""
+        messagebox.showinfo(self._t("help_title"), self._t("help_text"))
+
     def _show_feedback(self):
         """显示提出建议对话框。"""
         messagebox.showinfo(self._t("feedback_title"), self._t("feedback_msg"))
@@ -1414,8 +1462,9 @@ class NanoMeasurer(tk.Tk):
         self.tools_menu.entryconfig(2, label=self._t("distribution"))
         self.tools_menu.entryconfig(4, label=self._t("color_analysis"))
 
-        self.about_menu.entryconfig(0, label=self._t("menu_feedback"))
-        self.about_menu.entryconfig(1, label=self._t("menu_licenses"))
+        self.about_menu.entryconfig(0, label=self._t("menu_help"))
+        self.about_menu.entryconfig(2, label=self._t("menu_feedback"))
+        self.about_menu.entryconfig(3, label=self._t("menu_licenses"))
 
         self.lf_scale.config(text=self._t("scale_info"))
         if self.scale > 0:
