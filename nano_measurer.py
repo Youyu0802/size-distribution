@@ -1515,12 +1515,7 @@ class NanoMeasurer(tk.Tk):
         self.btn_color.config(text=self._t("color_analysis"))
         self.btn_fit.config(text=self._t("fit_window"))
 
-        # 刷新菜单文本
-        self.menubar.entryconfig(0, label=self._t("menu_file"))
-        self.menubar.entryconfig(1, label=self._t("menu_view"))
-        self.menubar.entryconfig(2, label=self._t("menu_tools"))
-        self.menubar.entryconfig(3, label=self._t("menu_about"))
-
+        # 刷新菜单文本（子菜单项）
         self.file_menu.entryconfig(0, label=self._t("open_image"))
         self.file_menu.entryconfig(1, label=self._t("export_csv"))
 
