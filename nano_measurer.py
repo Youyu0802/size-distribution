@@ -194,7 +194,7 @@ STRINGS = {
     "ca_stats":             {"zh": "统计",           "en": "Statistics"},
     "ca_particle_count":    {"zh": "颗粒数: {n}",   "en": "Particles: {n}"},
     "ca_total_area_px":     {"zh": "总面积: {a} px²","en": "Total Area: {a} px²"},
-    "ca_total_area_nm":     {"zh": "总面积: {a} nm²","en": "Total Area: {a} nm²"},
+    "ca_total_area_unit":   {"zh": "总面积: {a} {u}","en": "Total Area: {a} {u}"},
     "ca_coverage":          {"zh": "覆盖率: {c:.2f}%","en": "Coverage: {c:.2f}%"},
     "ca_particle_list":     {"zh": "颗粒列表",       "en": "Particle List"},
     "ca_col_id":            {"zh": "#",              "en": "#"},
@@ -235,6 +235,17 @@ STRINGS = {
     "ca_color_undone":   {"zh": "已撤销颜色点 (剩余 {n} 个)", "en": "Color point undone ({n} remaining)"},
     "ca_no_color_undo":  {"zh": "没有可撤销的颜色点", "en": "No color point to undo"},
     "ca_auto_tol":       {"zh": "自动调整容差",   "en": "Auto Tolerance"},
+
+    # ---- 颜色分析分组 ----
+    "ca_group_select":   {"zh": "分组选择",       "en": "Group Select"},
+    "ca_clear_groups":   {"zh": "清除分组",       "en": "Clear Groups"},
+    "ca_group_hint":     {"zh": "在预览上拖动矩形框选分组",
+                          "en": "Drag rectangle to define group"},
+    "ca_group_name_prompt": {"zh": "输入分组名称:", "en": "Enter group name:"},
+    "ca_group_created":  {"zh": "已创建分组 \"{name}\" ({n} 颗粒)",
+                          "en": "Group \"{name}\" created ({n} particles)"},
+    "ca_group_empty":    {"zh": "框选区域内没有颗粒", "en": "No particles in selection"},
+    "ca_col_group":      {"zh": "分组",           "en": "Group"},
 
     # ---- 菜单栏 ----
     "menu_file":         {"zh": "文件",           "en": "File"},
@@ -709,6 +720,13 @@ class ColorAnalysisWindow(tk.Toplevel):
         self._add_color_mode = False
         self._added_colors: list[tuple[int, int, int]] = []  # 新添加的 (R, G, B) 列表
 
+        # 分组状态
+        self._ca_groups: list[tuple[str, float, float, float, float]] = []  # (name, x1, y1, x2, y2) 图像坐标
+        self._ca_group_labels: list[str] = []  # 每个颗粒的分组标签
+        self._centroids_full: list[tuple[float, float]] = []  # 颗粒质心 (图像坐标)
+        self._group_mode = False
+        self._group_drag_start: tuple[float, float] | None = None
+
         self.title(self._t("ca_title"))
         self.geometry("820x780")
         self.minsize(640, 600)
@@ -719,6 +737,20 @@ class ColorAnalysisWindow(tk.Toplevel):
     # -- i18n helper (委托给 app) --
     def _t(self, key, **kwargs):
         return self.app._t(key, **kwargs)
+
+    def _area_display_factor(self):
+        """返回 px² → display_unit² 的换算因子。"""
+        if self.app.scale <= 0:
+            return 0.0
+        calib_factor = self.app.scale ** 2
+        unit_factor = convert_length(1, self.app.unit, self.app.display_unit) ** 2
+        return calib_factor * unit_factor
+
+    def _area_unit_str(self):
+        """返回当前显示面积单位字符串，如 'μm²'。"""
+        if self.app.scale > 0:
+            return f"{self.app.display_unit}\u00b2"
+        return "px\u00b2"
 
     # ---------------------------------------------------------------- UI
     def _build_ui(self):
@@ -819,14 +851,16 @@ class ColorAnalysisWindow(tk.Toplevel):
         list_frame = ttk.LabelFrame(bottom, text=self._t("ca_particle_list"), padding=4)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 4))
 
-        unit = "nm\u00b2" if self.app.scale > 0 else "px\u00b2"
-        cols = ("ca_col_id", "ca_col_area")
+        unit = self._area_unit_str()
+        cols = ("ca_col_id", "ca_col_area", "ca_col_group")
         self.ptree = ttk.Treeview(list_frame, columns=cols, show="headings",
                                   height=6, selectmode="extended")
         self.ptree.heading("ca_col_id", text=self._t("ca_col_id"), anchor=tk.CENTER)
         self.ptree.heading("ca_col_area", text=self._t("ca_col_area", u=unit), anchor=tk.CENTER)
+        self.ptree.heading("ca_col_group", text=self._t("ca_col_group"), anchor=tk.CENTER)
         self.ptree.column("ca_col_id", width=50, anchor=tk.CENTER)
         self.ptree.column("ca_col_area", width=120, anchor=tk.CENTER)
+        self.ptree.column("ca_col_group", width=80, anchor=tk.CENTER)
 
         sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.ptree.yview)
         self.ptree.configure(yscrollcommand=sb.set)
@@ -839,6 +873,14 @@ class ColorAnalysisWindow(tk.Toplevel):
                    command=self._show_area_histogram).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_row, text=self._t("ca_export_csv"),
                    command=self._export_area_csv).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(btn_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=6, fill=tk.Y)
+        ttk.Button(btn_row, text=self._t("ca_group_select"),
+                   command=self._start_ca_group_select).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_row, text=self._t("ca_clear_groups"),
+                   command=self._clear_ca_groups).pack(side=tk.LEFT, padx=2)
+        self._group_hint_var = tk.StringVar(value="")
+        ttk.Label(btn_row, textvariable=self._group_hint_var,
+                  foreground="gray").pack(side=tk.LEFT, padx=6)
 
         # ---- 手动分割控件 ----
         split_row = ttk.Frame(bottom)
@@ -1009,16 +1051,24 @@ class ColorAnalysisWindow(tk.Toplevel):
 
         self._render_preview()
 
+        # 保存质心 (图像坐标) 用于分组
+        self._centroids_full = centroids_full
+
+        # 重新分配分组标签
+        self._assign_ca_groups()
+
         # -- 统计 --
         total_px = int(np.sum(self.particle_areas)) if n_particles > 0 else 0
         total_pixels = self.img_h_total * self.img_w_total
         coverage = total_px / total_pixels * 100.0 if total_pixels > 0 else 0.0
 
         has_scale = self.app.scale > 0
-        nm2_per_px2 = self.app.scale ** 2 if has_scale else 0.0
+        area_factor = self._area_display_factor()
+        unit = self._area_unit_str()
 
         if has_scale:
-            total_area_str = self._t("ca_total_area_nm", a=f"{total_px * nm2_per_px2:.1f}")
+            total_area_str = self._t("ca_total_area_unit",
+                                     a=f"{total_px * area_factor:.1f}", u=unit)
         else:
             total_area_str = self._t("ca_total_area_px", a=total_px)
 
@@ -1030,20 +1080,87 @@ class ColorAnalysisWindow(tk.Toplevel):
 
         # -- 颗粒列表 --
         self.ptree.delete(*self.ptree.get_children())
-        unit = "nm\u00b2" if has_scale else "px\u00b2"
         self.ptree.heading("ca_col_area", text=self._t("ca_col_area", u=unit))
         for i, a_px in enumerate(self.particle_areas, 1):
             if has_scale:
-                val = f"{a_px * nm2_per_px2:.2f}"
+                val = f"{a_px * area_factor:.2f}"
             else:
                 val = str(a_px)
-            self.ptree.insert("", tk.END, iid=str(i), values=(i, val))
+            grp = self._ca_group_labels[i - 1] if i - 1 < len(self._ca_group_labels) else ""
+            self.ptree.insert("", tk.END, iid=str(i), values=(i, val, grp))
+
+    # --------------------------------------------------------- 颜色分析分组
+    def _assign_ca_groups(self):
+        """根据颗粒质心和分组矩形，分配分组标签。"""
+        labels = []
+        for cx, cy in self._centroids_full:
+            assigned = ""
+            for name, x1, y1, x2, y2 in self._ca_groups:
+                gx1, gy1 = min(x1, x2), min(y1, y2)
+                gx2, gy2 = max(x1, x2), max(y1, y2)
+                if gx1 <= cx <= gx2 and gy1 <= cy <= gy2:
+                    assigned = name
+                    break
+            labels.append(assigned)
+        self._ca_group_labels = labels
+
+    def _start_ca_group_select(self):
+        """启动分组框选模式。"""
+        self._group_mode = True
+        self._split_mode.set(False)
+        self._add_color_var.set(False)
+        self.preview_canvas.config(cursor="crosshair")
+        self._group_hint_var.set(self._t("ca_group_hint"))
+
+    def _end_ca_group_select(self):
+        """退出分组框选模式。"""
+        self._group_mode = False
+        self._group_drag_start = None
+        self.preview_canvas.config(cursor="")
+        self._group_hint_var.set("")
+        self.preview_canvas.delete("group_rect")
+
+    def _clear_ca_groups(self):
+        """清除所有分组。"""
+        self._ca_groups.clear()
+        self._ca_group_labels = [""] * len(self._centroids_full)
+        self._end_ca_group_select()
+        self._update_preview()
+
+    def _canvas_to_full(self, cx, cy):
+        """将画布坐标转换为原图坐标。"""
+        cw = self.preview_canvas.winfo_width()
+        ch = self.preview_canvas.winfo_height()
+        base_s = min(cw / self.thumb_w, ch / self.thumb_h)
+        actual_s = base_s * self._pv_zoom
+        img_cx = (cw - self.thumb_w * actual_s) / 2 + self._pv_ox
+        img_cy = (ch - self.thumb_h * actual_s) / 2 + self._pv_oy
+        tx = (cx - img_cx) / actual_s
+        ty = (cy - img_cy) / actual_s
+        fx = tx * self.img_w_total / self.thumb_w
+        fy = ty * self.img_h_total / self.thumb_h
+        return fx, fy
+
+    def _full_to_canvas(self, fx, fy):
+        """将原图坐标转换为画布坐标。"""
+        cw = self.preview_canvas.winfo_width()
+        ch = self.preview_canvas.winfo_height()
+        base_s = min(cw / self.thumb_w, ch / self.thumb_h)
+        actual_s = base_s * self._pv_zoom
+        img_cx = (cw - self.thumb_w * actual_s) / 2 + self._pv_ox
+        img_cy = (ch - self.thumb_h * actual_s) / 2 + self._pv_oy
+        tx = fx * self.thumb_w / self.img_w_total
+        ty = fy * self.thumb_h / self.img_h_total
+        cx = img_cx + tx * actual_s
+        cy = img_cy + ty * actual_s
+        return cx, cy
 
     # --------------------------------------------------------- 手动分割
     def _on_split_mode_change(self):
         if self._split_mode.get():
-            # 关闭添加颜色点模式
+            # 关闭添加颜色点模式和分组模式
             self._add_color_var.set(False)
+            self._end_ca_group_select()
             self.preview_canvas.config(cursor="crosshair")
             self._split_hint_var.set(self._t("ca_split_hint"))
         else:
@@ -1054,8 +1171,9 @@ class ColorAnalysisWindow(tk.Toplevel):
     # --------------------------------------------------------- 添加颜色点
     def _on_add_color_mode_change(self):
         if self._add_color_var.get():
-            # 关闭手动分割模式
+            # 关闭手动分割模式和分组模式
             self._split_mode.set(False)
+            self._end_ca_group_select()
             self.preview_canvas.config(cursor="crosshair")
             self._add_color_hint_var.set(self._t("ca_add_color_hint"))
         else:
@@ -1198,12 +1316,25 @@ class ColorAnalysisWindow(tk.Toplevel):
         if self._add_color_var.get():
             self._add_color_at_position(event.x, event.y)
             return
+        # 分组框选模式
+        if self._group_mode:
+            self._group_drag_start = (event.x, event.y)
+            return
         if not self._split_mode.get():
             return
         self._split_drawing = True
         self._split_points = [(event.x, event.y)]
 
     def _pv_on_left_drag(self, event):
+        # 分组框选拖拽
+        if self._group_mode and self._group_drag_start is not None:
+            self.preview_canvas.delete("group_rect")
+            x0, y0 = self._group_drag_start
+            self.preview_canvas.create_rectangle(
+                x0, y0, event.x, event.y,
+                outline="#00FF00", width=2, dash=(4, 4), tags="group_rect",
+            )
+            return
         if not self._split_drawing:
             return
         self._split_points.append((event.x, event.y))
@@ -1223,6 +1354,44 @@ class ColorAnalysisWindow(tk.Toplevel):
             )
 
     def _pv_on_left_release(self, event):
+        # 分组框选释放
+        if self._group_mode and self._group_drag_start is not None:
+            self.preview_canvas.delete("group_rect")
+            x0, y0 = self._group_drag_start
+            x1, y1 = event.x, event.y
+            self._group_drag_start = None
+            # 至少拖拽 5 px 才算有效
+            if abs(x1 - x0) < 5 or abs(y1 - y0) < 5:
+                return
+            # 画布坐标 → 原图坐标
+            fx0, fy0 = self._canvas_to_full(x0, y0)
+            fx1, fy1 = self._canvas_to_full(x1, y1)
+            gx1, gy1 = min(fx0, fx1), min(fy0, fy1)
+            gx2, gy2 = max(fx0, fx1), max(fy0, fy1)
+            # 计算框内颗粒数
+            count = sum(1 for cx, cy in self._centroids_full
+                        if gx1 <= cx <= gx2 and gy1 <= cy <= gy2)
+            if count == 0:
+                self._group_hint_var.set(self._t("ca_group_empty"))
+                return
+            name = simpledialog.askstring(
+                self._t("ca_group_select"),
+                self._t("ca_group_name_prompt"),
+                parent=self,
+            )
+            if not name:
+                return
+            self._ca_groups.append((name, gx1, gy1, gx2, gy2))
+            self._assign_ca_groups()
+            self._group_hint_var.set(self._t("ca_group_created", name=name, n=count))
+            self._render_preview()
+            # 更新颗粒列表中的分组列
+            for i in range(len(self.particle_areas)):
+                iid = str(i + 1)
+                grp = self._ca_group_labels[i] if i < len(self._ca_group_labels) else ""
+                old_vals = self.ptree.item(iid, "values")
+                self.ptree.item(iid, values=(old_vals[0], old_vals[1], grp))
+            return
         if not self._split_drawing:
             return
         self._split_drawing = False
@@ -1396,6 +1565,22 @@ class ColorAnalysisWindow(tk.Toplevel):
                     font=("Arial", font_size, "bold"),
                 )
 
+        # 绘制分组矩形
+        group_colors = ["#00FF00", "#FF6600", "#00CCFF", "#FF00FF",
+                        "#FFFF00", "#00FF80", "#8080FF", "#FF8080"]
+        for gi, (gname, gx1, gy1, gx2, gy2) in enumerate(self._ca_groups):
+            cx1, cy1 = self._full_to_canvas(gx1, gy1)
+            cx2, cy2 = self._full_to_canvas(gx2, gy2)
+            gc = group_colors[gi % len(group_colors)]
+            self.preview_canvas.create_rectangle(
+                cx1, cy1, cx2, cy2,
+                outline=gc, width=2, dash=(6, 3),
+            )
+            self.preview_canvas.create_text(
+                cx1 + 3, cy1 + 2, text=gname, anchor=tk.NW,
+                fill=gc, font=("Arial", max(8, font_size), "bold"),
+            )
+
     # --------------------------------------------------------- 面积直方图
     def _show_area_histogram(self):
         if not self.particle_areas:
@@ -1403,14 +1588,13 @@ class ColorAnalysisWindow(tk.Toplevel):
             return
 
         has_scale = self.app.scale > 0
-        nm2_per_px2 = self.app.scale ** 2 if has_scale else 0.0
+        area_factor = self._area_display_factor()
+        unit = self._area_unit_str()
 
         if has_scale:
-            vals = np.array(self.particle_areas, dtype=float) * nm2_per_px2
-            unit = "nm\u00b2"
+            vals = np.array(self.particle_areas, dtype=float) * area_factor
         else:
             vals = np.array(self.particle_areas, dtype=float)
-            unit = "px\u00b2"
 
         n = len(vals)
         mean = np.mean(vals)
@@ -1464,21 +1648,30 @@ class ColorAnalysisWindow(tk.Toplevel):
             return
 
         has_scale = self.app.scale > 0
-        nm2_per_px2 = self.app.scale ** 2 if has_scale else 0.0
-        unit = "nm\u00b2" if has_scale else "px\u00b2"
+        area_factor = self._area_display_factor()
+        unit = self._area_unit_str()
+        has_groups = bool(self._ca_groups)
 
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
-                writer.writerow(["#", self._t("ca_col_area", u=unit), self._t("ca_col_area", u="px\u00b2")])
+                header = ["#", self._t("ca_col_area", u=unit),
+                          self._t("ca_col_area", u="px\u00b2")]
+                if has_groups:
+                    header.append(self._t("ca_col_group"))
+                writer.writerow(header)
                 for i, a_px in enumerate(self.particle_areas, 1):
-                    a_val = a_px * nm2_per_px2 if has_scale else a_px
-                    writer.writerow([i, f"{a_val:.4f}", a_px])
+                    a_val = a_px * area_factor if has_scale else a_px
+                    row = [i, f"{a_val:.4f}", a_px]
+                    if has_groups:
+                        grp = self._ca_group_labels[i - 1] if i - 1 < len(self._ca_group_labels) else ""
+                        row.append(grp)
+                    writer.writerow(row)
 
                 writer.writerow([])
                 writer.writerow([self._t("csv_stat"), self._t("csv_value")])
 
-                vals = [a * nm2_per_px2 for a in self.particle_areas] if has_scale else list(self.particle_areas)
+                vals = [a * area_factor for a in self.particle_areas] if has_scale else [float(a) for a in self.particle_areas]
                 n = len(vals)
                 mean = np.mean(vals)
                 std_val = np.std(vals, ddof=1) if n > 1 else 0.0
@@ -1493,7 +1686,29 @@ class ColorAnalysisWindow(tk.Toplevel):
                 writer.writerow([self._t("csv_max"), f"{max(vals):.4f}"])
                 writer.writerow([self._t("ca_coverage", c=0.0).split(":")[0], f"{coverage:.2f}%"])
                 if has_scale:
-                    writer.writerow([self._t("csv_scale"), f"{self.app.scale:.6f}"])
+                    scale_unit = f"{self.app.unit}/px"
+                    writer.writerow([f"{self._t('csv_scale').split('(')[0].strip()} ({scale_unit})",
+                                     f"{self.app.scale:.6f}"])
+
+                # ---- 分组统计 ----
+                if has_groups:
+                    group_data: dict[str, list[float]] = {}
+                    for i, a_px in enumerate(self.particle_areas):
+                        grp = self._ca_group_labels[i] if i < len(self._ca_group_labels) else ""
+                        if grp:
+                            a_val = a_px * area_factor if has_scale else float(a_px)
+                            group_data.setdefault(grp, []).append(a_val)
+                    for gname, gvals in group_data.items():
+                        writer.writerow([])
+                        writer.writerow([self._t("csv_group_stat", name=gname)])
+                        gn = len(gvals)
+                        gmean = np.mean(gvals)
+                        gstd = np.std(gvals, ddof=1) if gn > 1 else 0.0
+                        writer.writerow([self._t("ca_particle_count", n=""), gn])
+                        writer.writerow([self._t("csv_mean"), f"{gmean:.4f}"])
+                        writer.writerow([self._t("csv_std"), f"{gstd:.4f}"])
+                        writer.writerow([self._t("csv_min"), f"{min(gvals):.4f}"])
+                        writer.writerow([self._t("csv_max"), f"{max(gvals):.4f}"])
 
                 # ---- 高斯拟合 ----
                 if n > 1 and std_val > 0:
