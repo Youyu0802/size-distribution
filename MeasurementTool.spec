@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='Measurement tool v1.5',
+    name='Measurement tool v1.6',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

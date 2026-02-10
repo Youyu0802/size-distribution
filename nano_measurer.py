@@ -250,6 +250,16 @@ STRINGS = {
     "ca_delete_group_prompt": {"zh": "选择要删除的分组:", "en": "Select group to delete:"},
     "ca_group_deleted":  {"zh": "已删除分组 \"{name}\"", "en": "Group \"{name}\" deleted"},
     "ca_no_groups":      {"zh": "没有分组可删除",   "en": "No groups to delete"},
+    "ca_delete_particles":  {"zh": "删除颗粒",     "en": "Delete Particles"},
+    "ca_undo_delete":       {"zh": "撤销删除",     "en": "Undo Delete"},
+    "ca_deleted_fmt":       {"zh": "已删除 {n} 个颗粒", "en": "Deleted {n} particle(s)"},
+    "ca_delete_hint":       {"zh": "在预览上拖动矩形框选要删除的颗粒 (也可在列表中选择后按Delete键)",
+                             "en": "Drag rectangle to delete particles (or select in list and press Delete)"},
+    "ca_delete_empty":      {"zh": "框选区域内没有颗粒", "en": "No particles in selection"},
+    "ca_undo_delete_fmt":   {"zh": "已撤销删除 ({n} 个颗粒恢复)",
+                             "en": "Undo delete ({n} particle(s) restored)"},
+    "ca_no_delete_undo":    {"zh": "没有可撤销的删除操作",
+                             "en": "No delete to undo"},
 
     # ---- 容差说明 ----
     "ca_h_tol_desc":     {"zh": "色相容差: 控制颜色类型的匹配范围 (红/橙/黄/绿/蓝/紫)",
@@ -727,6 +737,12 @@ class ColorAnalysisWindow(tk.Toplevel):
         # 手动分割状态
         self._cut_mask = np.zeros((self.img_h_total, self.img_w_total), dtype=bool)
         self._cut_strokes: list[np.ndarray] = []
+
+        # 颗粒删除状态
+        self._delete_mask = np.zeros((self.img_h_total, self.img_w_total), dtype=bool)
+        self._delete_history: list[np.ndarray] = []  # 每次删除操作的 mask，用于撤销
+        self._delete_mode = False
+        self._delete_drag_start: tuple[float, float] | None = None
         self._split_drawing = False
         self._split_points: list[tuple[float, float]] = []
 
@@ -889,6 +905,7 @@ class ColorAnalysisWindow(tk.Toplevel):
         sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.ptree.yview)
         self.ptree.configure(yscrollcommand=sb.set)
         self.ptree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.ptree.bind("<Delete>", self._delete_selected_in_list)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
 
         btn_row = ttk.Frame(bottom)
@@ -897,6 +914,11 @@ class ColorAnalysisWindow(tk.Toplevel):
                    command=self._show_area_histogram).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_row, text=self._t("ca_export_csv"),
                    command=self._export_area_csv).pack(side=tk.LEFT, padx=2)
+        ttk.Separator(btn_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=6, fill=tk.Y)
+        ttk.Button(btn_row, text=self._t("ca_delete_particles"),
+                   command=self._start_delete_mode).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_row, text=self._t("ca_undo_delete"),
+                   command=self._undo_delete_particles).pack(side=tk.LEFT, padx=2)
         ttk.Separator(btn_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=6, fill=tk.Y)
         ttk.Button(btn_row, text=self._t("ca_group_select"),
                    command=self._start_ca_group_select).pack(side=tk.LEFT, padx=2)
@@ -989,6 +1011,10 @@ class ColorAnalysisWindow(tk.Toplevel):
         if self._cut_mask.any():
             mask = mask & ~self._cut_mask
 
+        # 应用颗粒删除蒙版
+        if self._delete_mask.any():
+            mask = mask & ~self._delete_mask
+
         labeled, num_features = ndimage_label(mask)
         empty_labeled = np.zeros_like(mask, dtype=np.int32)
 
@@ -1047,6 +1073,7 @@ class ColorAnalysisWindow(tk.Toplevel):
         """重算 mask，更新预览画布、统计和颗粒列表。"""
         self._pending_update = None
         self.mask, labeled, self.particle_areas, centroids_full = self._compute_mask()
+        self._labeled = labeled  # 保存标记数组，用于颗粒删除
         n_particles = len(self.particle_areas)
 
         # -- 生成彩色遮罩预览图 (缩略图尺寸) --
@@ -1115,6 +1142,58 @@ class ColorAnalysisWindow(tk.Toplevel):
             grp = self._ca_group_labels[i - 1] if i - 1 < len(self._ca_group_labels) else ""
             self.ptree.insert("", tk.END, iid=str(i), values=(i, val, grp))
 
+    # --------------------------------------------------------- 颗粒删除
+    def _start_delete_mode(self):
+        """启动框选删除模式。"""
+        self._delete_mode = True
+        self._split_mode.set(False)
+        self._add_color_var.set(False)
+        self._end_ca_group_select()
+        self.preview_canvas.config(cursor="crosshair")
+        self._group_hint_var.set(self._t("ca_delete_hint"))
+
+    def _end_delete_mode(self):
+        """退出框选删除模式。"""
+        self._delete_mode = False
+        self._delete_drag_start = None
+        self.preview_canvas.config(cursor="")
+        self._group_hint_var.set("")
+        self.preview_canvas.delete("delete_rect")
+
+    def _delete_particles_by_ids(self, ids):
+        """根据颗粒编号列表 (1-based) 删除颗粒。"""
+        if not ids:
+            return
+        batch_mask = np.zeros_like(self._delete_mask)
+        for pid in ids:
+            batch_mask |= (self._labeled == pid)
+        self._delete_history.append(batch_mask)
+        self._delete_mask |= batch_mask
+        self._group_hint_var.set(self._t("ca_deleted_fmt", n=len(ids)))
+        self._update_preview()
+
+    def _delete_selected_in_list(self, _event=None):
+        """从列表选中项删除颗粒（Delete键触发）。"""
+        sel = self.ptree.selection()
+        if not sel:
+            return
+        ids = [int(s) for s in sel]
+        self._delete_particles_by_ids(ids)
+
+    def _undo_delete_particles(self):
+        """撤销最近一次颗粒删除操作。"""
+        if not self._delete_history:
+            self._group_hint_var.set(self._t("ca_no_delete_undo"))
+            return
+        last = self._delete_history.pop()
+        n_restored = len(np.unique(ndimage_label(last)[0])) - 1  # 估算恢复颗粒数
+        # 重建删除蒙版
+        self._delete_mask = np.zeros((self.img_h_total, self.img_w_total), dtype=bool)
+        for dm in self._delete_history:
+            self._delete_mask |= dm
+        self._group_hint_var.set(self._t("ca_undo_delete_fmt", n=max(1, n_restored)))
+        self._update_preview()
+
     # --------------------------------------------------------- 颜色分析分组
     def _assign_ca_groups(self):
         """根据颗粒质心和分组矩形，分配分组标签。"""
@@ -1135,6 +1214,7 @@ class ColorAnalysisWindow(tk.Toplevel):
         self._group_mode = True
         self._split_mode.set(False)
         self._add_color_var.set(False)
+        self._end_delete_mode()
         self.preview_canvas.config(cursor="crosshair")
         self._group_hint_var.set(self._t("ca_group_hint"))
 
@@ -1226,9 +1306,10 @@ class ColorAnalysisWindow(tk.Toplevel):
     # --------------------------------------------------------- 手动分割
     def _on_split_mode_change(self):
         if self._split_mode.get():
-            # 关闭添加颜色点模式和分组模式
+            # 关闭添加颜色点模式、分组模式和删除模式
             self._add_color_var.set(False)
             self._end_ca_group_select()
+            self._end_delete_mode()
             self.preview_canvas.config(cursor="crosshair")
             self._split_hint_var.set(self._t("ca_split_hint"))
         else:
@@ -1239,9 +1320,10 @@ class ColorAnalysisWindow(tk.Toplevel):
     # --------------------------------------------------------- 添加颜色点
     def _on_add_color_mode_change(self):
         if self._add_color_var.get():
-            # 关闭手动分割模式和分组模式
+            # 关闭手动分割模式、分组模式和删除模式
             self._split_mode.set(False)
             self._end_ca_group_select()
+            self._end_delete_mode()
             self.preview_canvas.config(cursor="crosshair")
             self._add_color_hint_var.set(self._t("ca_add_color_hint"))
         else:
@@ -1384,6 +1466,10 @@ class ColorAnalysisWindow(tk.Toplevel):
         if self._add_color_var.get():
             self._add_color_at_position(event.x, event.y)
             return
+        # 框选删除模式
+        if self._delete_mode:
+            self._delete_drag_start = (event.x, event.y)
+            return
         # 分组框选模式
         if self._group_mode:
             self._group_drag_start = (event.x, event.y)
@@ -1394,6 +1480,15 @@ class ColorAnalysisWindow(tk.Toplevel):
         self._split_points = [(event.x, event.y)]
 
     def _pv_on_left_drag(self, event):
+        # 框选删除拖拽
+        if self._delete_mode and self._delete_drag_start is not None:
+            self.preview_canvas.delete("delete_rect")
+            x0, y0 = self._delete_drag_start
+            self.preview_canvas.create_rectangle(
+                x0, y0, event.x, event.y,
+                outline="#FF0000", width=2, dash=(4, 4), tags="delete_rect",
+            )
+            return
         # 分组框选拖拽
         if self._group_mode and self._group_drag_start is not None:
             self.preview_canvas.delete("group_rect")
@@ -1422,6 +1517,26 @@ class ColorAnalysisWindow(tk.Toplevel):
             )
 
     def _pv_on_left_release(self, event):
+        # 框选删除释放
+        if self._delete_mode and self._delete_drag_start is not None:
+            self.preview_canvas.delete("delete_rect")
+            x0, y0 = self._delete_drag_start
+            x1, y1 = event.x, event.y
+            self._delete_drag_start = None
+            if abs(x1 - x0) < 5 or abs(y1 - y0) < 5:
+                return
+            fx0, fy0 = self._canvas_to_full(x0, y0)
+            fx1, fy1 = self._canvas_to_full(x1, y1)
+            gx1, gy1 = min(fx0, fx1), min(fy0, fy1)
+            gx2, gy2 = max(fx0, fx1), max(fy0, fy1)
+            # 找到框内颗粒的编号 (1-based)
+            ids = [i + 1 for i, (cx, cy) in enumerate(self._centroids_full)
+                   if gx1 <= cx <= gx2 and gy1 <= cy <= gy2]
+            if not ids:
+                self._group_hint_var.set(self._t("ca_delete_empty"))
+                return
+            self._delete_particles_by_ids(ids)
+            return
         # 分组框选释放
         if self._group_mode and self._group_drag_start is not None:
             self.preview_canvas.delete("group_rect")
