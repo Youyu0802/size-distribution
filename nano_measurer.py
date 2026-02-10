@@ -246,6 +246,20 @@ STRINGS = {
                           "en": "Group \"{name}\" created ({n} particles)"},
     "ca_group_empty":    {"zh": "框选区域内没有颗粒", "en": "No particles in selection"},
     "ca_col_group":      {"zh": "分组",           "en": "Group"},
+    "ca_delete_group":   {"zh": "删除分组",       "en": "Delete Group"},
+    "ca_delete_group_prompt": {"zh": "选择要删除的分组:", "en": "Select group to delete:"},
+    "ca_group_deleted":  {"zh": "已删除分组 \"{name}\"", "en": "Group \"{name}\" deleted"},
+    "ca_no_groups":      {"zh": "没有分组可删除",   "en": "No groups to delete"},
+
+    # ---- 容差说明 ----
+    "ca_h_tol_desc":     {"zh": "色相容差: 控制颜色类型的匹配范围 (红/橙/黄/绿/蓝/紫)",
+                          "en": "Hue tolerance: range of color types matched (red/orange/yellow/green/blue/purple)"},
+    "ca_s_tol_desc":     {"zh": "饱和度容差: 控制颜色鲜艳程度的匹配范围 (鲜艳↔灰暗)",
+                          "en": "Saturation tolerance: range of color vividness matched (vivid ↔ dull)"},
+    "ca_v_tol_desc":     {"zh": "明度容差: 控制颜色明暗程度的匹配范围 (亮↔暗)",
+                          "en": "Value tolerance: range of brightness matched (bright ↔ dark)"},
+    "ca_min_area_desc":  {"zh": "过滤小于该像素面积的噪点颗粒",
+                          "en": "Filter out noise particles smaller than this pixel area"},
 
     # ---- 菜单栏 ----
     "menu_file":         {"zh": "文件",           "en": "File"},
@@ -795,10 +809,10 @@ class ColorAnalysisWindow(tk.Toplevel):
         self.v_tol = tk.IntVar(value=init_v)
         self.min_area = tk.IntVar(value=10)
 
-        for label_key, var, from_, to_ in [
-            ("ca_h_tol", self.h_tol, 0, 90),
-            ("ca_s_tol", self.s_tol, 0, 128),
-            ("ca_v_tol", self.v_tol, 0, 128),
+        for label_key, var, from_, to_, desc_key in [
+            ("ca_h_tol", self.h_tol, 0, 90, "ca_h_tol_desc"),
+            ("ca_s_tol", self.s_tol, 0, 128, "ca_s_tol_desc"),
+            ("ca_v_tol", self.v_tol, 0, 128, "ca_v_tol_desc"),
         ]:
             row = ttk.Frame(tol_frame)
             row.pack(fill=tk.X, pady=1)
@@ -807,6 +821,11 @@ class ColorAnalysisWindow(tk.Toplevel):
                            command=lambda *_a: self._on_slider_change())
             sc.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4))
             ttk.Label(row, textvariable=var, width=5).pack(side=tk.LEFT)
+            # 容差说明
+            desc_row = ttk.Frame(tol_frame)
+            desc_row.pack(fill=tk.X)
+            ttk.Label(desc_row, text=self._t(desc_key),
+                      foreground="gray", font=("", 8)).pack(side=tk.LEFT, padx=(8, 0))
 
         # 最小面积
         row_area = ttk.Frame(tol_frame)
@@ -820,6 +839,11 @@ class ColorAnalysisWindow(tk.Toplevel):
         lbl_area.pack(side=tk.LEFT)
         ttk.Label(lbl_area, textvariable=self.min_area, width=4).pack(side=tk.LEFT)
         ttk.Label(lbl_area, text=self._t("ca_min_area_unit")).pack(side=tk.LEFT)
+        # 最小面积说明
+        desc_area_row = ttk.Frame(tol_frame)
+        desc_area_row.pack(fill=tk.X)
+        ttk.Label(desc_area_row, text=self._t("ca_min_area_desc"),
+                  foreground="gray", font=("", 8)).pack(side=tk.LEFT, padx=(8, 0))
 
         # ---- 预览画布 ----
         pf = ttk.LabelFrame(self, text=self._t("ca_preview"), padding=4)
@@ -876,6 +900,8 @@ class ColorAnalysisWindow(tk.Toplevel):
         ttk.Separator(btn_row, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=6, fill=tk.Y)
         ttk.Button(btn_row, text=self._t("ca_group_select"),
                    command=self._start_ca_group_select).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_row, text=self._t("ca_delete_group"),
+                   command=self._delete_ca_group).pack(side=tk.LEFT, padx=2)
         ttk.Button(btn_row, text=self._t("ca_clear_groups"),
                    command=self._clear_ca_groups).pack(side=tk.LEFT, padx=2)
         self._group_hint_var = tk.StringVar(value="")
@@ -1119,6 +1145,48 @@ class ColorAnalysisWindow(tk.Toplevel):
         self.preview_canvas.config(cursor="")
         self._group_hint_var.set("")
         self.preview_canvas.delete("group_rect")
+
+    def _delete_ca_group(self):
+        """删除指定分组。弹出选择对话框让用户选取要删除的分组。"""
+        if not self._ca_groups:
+            self._group_hint_var.set(self._t("ca_no_groups"))
+            return
+        # 构建分组名称列表
+        names = [g[0] for g in self._ca_groups]
+        # 弹出选择对话框
+        win = tk.Toplevel(self)
+        win.title(self._t("ca_delete_group"))
+        win.geometry("300x200")
+        win.transient(self)
+        win.grab_set()
+        ttk.Label(win, text=self._t("ca_delete_group_prompt")).pack(padx=10, pady=(10, 5))
+        lb = tk.Listbox(win, selectmode=tk.EXTENDED, height=min(8, len(names)))
+        for n in names:
+            lb.insert(tk.END, n)
+        lb.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        def _do_delete():
+            sel = lb.curselection()
+            if not sel:
+                win.destroy()
+                return
+            # 从后往前删，索引不会乱
+            deleted_names = []
+            for idx in sorted(sel, reverse=True):
+                deleted_names.append(self._ca_groups[idx][0])
+                del self._ca_groups[idx]
+            self._assign_ca_groups()
+            self._group_hint_var.set(
+                self._t("ca_group_deleted", name=", ".join(reversed(deleted_names))))
+            win.destroy()
+            self._update_preview()
+
+        btn_frame = ttk.Frame(win)
+        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ttk.Button(btn_frame, text=self._t("ca_delete_group"),
+                   command=_do_delete).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text=self._t("cancelled") if "cancelled" in STRINGS else "Cancel",
+                   command=win.destroy).pack(side=tk.LEFT, padx=2)
 
     def _clear_ca_groups(self):
         """清除所有分组。"""
