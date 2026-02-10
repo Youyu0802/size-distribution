@@ -14,6 +14,8 @@ A desktop application for measuring nanoparticle sizes from TEM/SEM images.
 - **Particle Measurement** - Click to measure particle diameters
 - **Size Distribution** - Generate histograms with Gaussian fitting
 - **Color Analysis** - Automatic particle detection by color
+- **Measurement Grouping** - Draw rectangles to group measurements with per-group statistics
+- **Unit Conversion** - Switch display units (Å, nm, μm, mm, cm) at any time
 - **Data Export** - Export measurements to CSV with Gaussian fit curve & formula
 - **Bilingual UI** - Chinese/English interface
 
@@ -23,6 +25,8 @@ A desktop application for measuring nanoparticle sizes from TEM/SEM images.
 - **粒径测量** - 点击测量颗粒直径
 - **粒径分布** - 生成直方图并进行高斯拟合
 - **颜色分析** - 基于颜色自动识别颗粒
+- **测量分组** - 绘制矩形框将测量分组，支持分组统计
+- **单位切换** - 随时切换显示单位（Å、nm、μm、mm、cm）
 - **数据导出** - 导出测量数据为 CSV，含高斯拟合曲线及公式
 - **双语界面** - 中文/英文切换
 

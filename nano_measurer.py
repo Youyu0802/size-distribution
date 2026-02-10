@@ -161,6 +161,19 @@ STRINGS = {
     "csv_gauss_x":      {"zh": "X ({u})",      "en": "X ({u})"},
     "csv_gauss_y":      {"zh": "Y (概率密度)", "en": "Y (Density)"},
 
+    # ---- 分组 ----
+    "group_select":     {"zh": "框选分组",     "en": "Select Group"},
+    "group_name_prompt":{"zh": "请输入分组名称:", "en": "Enter group name:"},
+    "group_hint":       {"zh": "分组: 拖拽框选区域，框内测量点归为一组 (右键取消)",
+                         "en": "Group: drag to select area, measurements inside form a group (right-click to cancel)"},
+    "group_created":    {"zh": "已创建分组 \"{name}\" ({n} 个测量)",
+                         "en": "Group \"{name}\" created ({n} measurements)"},
+    "group_empty":      {"zh": "框选区域内没有测量点", "en": "No measurements in selected area"},
+    "csv_group":        {"zh": "分组",         "en": "Group"},
+    "csv_group_stat":   {"zh": "分组统计: {name}", "en": "Group Statistics: {name}"},
+    "mode_group":       {"zh": "框选分组",     "en": "Group Select"},
+    "display_unit":     {"zh": "显示单位",     "en": "Display Unit"},
+
     # ---- 颜色分析 ----
     "color_analysis":       {"zh": "颜色分析",       "en": "Color Analysis"},
     "mode_pick_color":      {"zh": "取色",           "en": "Pick Color"},
@@ -387,6 +400,28 @@ class ScaleDialog(tk.Toplevel):
 
 
 # ---------------------------------------------------------------------------
+# 单位转换
+# ---------------------------------------------------------------------------
+
+UNIT_TO_NM = {
+    "Å":  0.1,
+    "nm": 1.0,
+    "μm": 1_000.0,
+    "mm": 1_000_000.0,
+    "cm": 10_000_000.0,
+}
+
+SUPPORTED_UNITS = ["Å", "nm", "μm", "mm", "cm"]
+
+
+def convert_length(value, from_unit, to_unit):
+    """在两个单位之间转换长度值。"""
+    if from_unit == to_unit:
+        return value
+    return value * UNIT_TO_NM[from_unit] / UNIT_TO_NM[to_unit]
+
+
+# ---------------------------------------------------------------------------
 # 数据结构
 # ---------------------------------------------------------------------------
 
@@ -399,6 +434,145 @@ class Measurement:
         self.x2, self.y2 = x2, y2
         self.pixel_dist = math.hypot(x2 - x1, y2 - y1)
         self.nm_dist = self.pixel_dist * scale if scale else 0.0
+
+    @property
+    def mid_x(self):
+        return (self.x1 + self.x2) / 2.0
+
+    @property
+    def mid_y(self):
+        return (self.y1 + self.y2) / 2.0
+
+
+class MeasurementGroup:
+    """矩形分组区域"""
+    __slots__ = ("name", "x1", "y1", "x2", "y2")
+
+    def __init__(self, name, x1, y1, x2, y2):
+        self.name = name
+        self.x1 = min(x1, x2)
+        self.y1 = min(y1, y2)
+        self.x2 = max(x1, x2)
+        self.y2 = max(y1, y2)
+
+    def contains_measurement(self, m: Measurement) -> bool:
+        """判断测量的中点是否在此分组矩形内（含边界）。"""
+        mx, my = m.mid_x, m.mid_y
+        return self.x1 <= mx <= self.x2 and self.y1 <= my <= self.y2
+
+
+def assign_groups(measurements, groups):
+    """为每个测量分配分组标签，返回与 measurements 等长的列表。"""
+    labels = []
+    for m in measurements:
+        assigned = ""
+        for g in groups:
+            if g.contains_measurement(m):
+                assigned = g.name
+                break
+        labels.append(assigned)
+    return labels
+
+
+def write_csv_with_groups(writer, measurements, groups, group_labels,
+                          scale=1.0, lang="zh",
+                          calib_unit="nm", display_unit=None):
+    """将测量数据（含分组）写入 CSV writer。"""
+    if display_unit is None:
+        display_unit = calib_unit
+
+    def _t(key, **kwargs):
+        entry = STRINGS.get(key)
+        if entry is None:
+            return key
+        raw = entry.get(lang, entry.get("zh", key))
+        if kwargs:
+            return raw.format(**kwargs)
+        return raw
+
+    def _conv(calib_val):
+        return convert_length(calib_val, calib_unit, display_unit)
+
+    unit = display_unit if scale > 0 else "px"
+    has_groups = len(groups) > 0
+
+    # Header
+    header = ["#", _t("csv_diameter", u=unit), _t("csv_pixel_dist"),
+              "X1", "Y1", "X2", "Y2"]
+    if has_groups:
+        header.append(_t("csv_group"))
+    writer.writerow(header)
+
+    # Data rows
+    for i, m in enumerate(measurements):
+        d = _conv(m.nm_dist) if scale > 0 else m.pixel_dist
+        row = [i + 1, f"{d:.4f}", f"{m.pixel_dist:.4f}",
+               f"{m.x1:.2f}", f"{m.y1:.2f}",
+               f"{m.x2:.2f}", f"{m.y2:.2f}"]
+        if has_groups:
+            row.append(group_labels[i])
+        writer.writerow(row)
+
+    # Overall statistics
+    if scale > 0:
+        vals = [_conv(m.nm_dist) for m in measurements]
+    else:
+        vals = [m.pixel_dist for m in measurements]
+    n = len(vals)
+    if n > 0:
+        writer.writerow([])
+        writer.writerow([_t("csv_stat"), _t("csv_value")])
+        mean = np.mean(vals)
+        std_val = np.std(vals, ddof=1) if n > 1 else 0.0
+        writer.writerow([_t("csv_count"), n])
+        writer.writerow([_t("csv_mean"), f"{mean:.4f}"])
+        writer.writerow([_t("csv_std"), f"{std_val:.4f}"])
+        writer.writerow([_t("csv_min"), f"{min(vals):.4f}"])
+        writer.writerow([_t("csv_max"), f"{max(vals):.4f}"])
+        if scale > 0:
+            writer.writerow([_t("csv_scale"), f"{scale:.6f}"])
+
+        # Gaussian fit
+        if n > 1 and std_val > 0:
+            writer.writerow([])
+            writer.writerow([_t("csv_gauss_title")])
+            writer.writerow([_t("csv_gauss_formula"),
+                             "f(x) = (1/(σ√(2π))) × exp(-(x-μ)²/(2σ²))"])
+            writer.writerow([_t("csv_gauss_mu"), f"{mean:.4f}"])
+            writer.writerow([_t("csv_gauss_sigma"), f"{std_val:.4f}"])
+
+            writer.writerow([])
+            vals_arr = np.array(vals)
+            x_fit = np.linspace(vals_arr.min() - std_val,
+                                vals_arr.max() + std_val, 200)
+            y_fit = norm.pdf(x_fit, mean, std_val)
+            writer.writerow([_t("csv_gauss_curve")])
+            writer.writerow([_t("csv_gauss_x", u=unit), _t("csv_gauss_y")])
+            for xv, yv in zip(x_fit, y_fit):
+                writer.writerow([f"{xv:.4f}", f"{yv:.6f}"])
+
+    # Per-group statistics
+    if has_groups:
+        for g in groups:
+            if scale > 0:
+                g_vals = [_conv(m.nm_dist) for m, lbl
+                          in zip(measurements, group_labels) if lbl == g.name]
+            else:
+                g_vals = [m.pixel_dist for m, lbl
+                          in zip(measurements, group_labels) if lbl == g.name]
+            gn = len(g_vals)
+            if gn == 0:
+                continue
+            writer.writerow([])
+            writer.writerow([_t("csv_group_stat", name=g.name)])
+            writer.writerow([_t("csv_stat"), _t("csv_value")])
+            g_mean = np.mean(g_vals)
+            g_std = np.std(g_vals, ddof=1) if gn > 1 else 0.0
+            writer.writerow([_t("csv_count"), gn])
+            writer.writerow([_t("csv_mean"), f"{g_mean:.4f}"])
+            writer.writerow([_t("csv_std"), f"{g_std:.4f}"])
+            writer.writerow([_t("csv_min"), f"{min(g_vals):.4f}"])
+            writer.writerow([_t("csv_max"), f"{max(g_vals):.4f}"])
 
 
 # ---------------------------------------------------------------------------
@@ -1371,18 +1545,22 @@ class NanoMeasurer(tk.Tk):
         self.offset_y = 0.0
 
         self.scale = 0.0
-        self.unit = "nm"  # 当前单位
-        self.units = ["nm", "μm", "mm", "Å"]  # 可选单位
+        self.unit = "nm"  # 校准单位
+        self.display_unit = "nm"  # 显示单位
+        self.units = SUPPORTED_UNITS
         self.mode = "idle"
         self.click_pt = None
 
         self.measurements: list[Measurement] = []
         self.undo_stack: list[Measurement] = []
+        self.groups: list[MeasurementGroup] = []
 
         self._pan_start = None
         self._right_press_pos = None
         self._rubber_line = None
         self._rubber_text = None
+
+        self._group_drag_start = None  # (ix, iy) for group rectangle drag
 
         self._pick_color_points: list[tuple] = []   # [(img_x, img_y, r, g, b), ...]
         self._pick_color_total: int = 1
@@ -1427,6 +1605,7 @@ class NanoMeasurer(tk.Tk):
         self.tools_menu.add_command(label=self._t("set_scale"), command=self.start_set_scale)
         self.tools_menu.add_command(label=self._t("measure"), command=self.start_measure)
         self.tools_menu.add_command(label=self._t("distribution"), command=self.show_histogram)
+        self.tools_menu.add_command(label=self._t("group_select"), command=self.start_group_select)
         self.tools_menu.add_separator()
         self.tools_menu.add_command(label=self._t("color_analysis"), command=self.start_pick_color)
 
@@ -1462,6 +1641,9 @@ class NanoMeasurer(tk.Tk):
         self.btn_color = ttk.Button(self.toolbar, text=self._t("color_analysis"),
                                     command=self.start_pick_color, **btn_cfg)
         self.btn_color.pack(side=tk.LEFT, padx=2)
+        self.btn_group = ttk.Button(self.toolbar, text=self._t("group_select"),
+                                    command=self.start_group_select, **btn_cfg)
+        self.btn_group.pack(side=tk.LEFT, padx=2)
 
         ttk.Separator(self.toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
         self.btn_fit = ttk.Button(self.toolbar, text=self._t("fit_window"),
@@ -1494,6 +1676,8 @@ class NanoMeasurer(tk.Tk):
 
         # -- 画布事件 --
         self.canvas.bind("<ButtonPress-1>", self._on_left_click)
+        self.canvas.bind("<B1-Motion>", self._on_left_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_left_release)
         self.canvas.bind("<ButtonPress-3>", self._on_right_press)
         self.canvas.bind("<B3-Motion>", self._on_right_drag)
         self.canvas.bind("<ButtonRelease-3>", self._on_right_release)
@@ -1508,6 +1692,19 @@ class NanoMeasurer(tk.Tk):
         self.lf_scale.pack(fill=tk.X, padx=4, pady=(4, 2))
         self.scale_label = ttk.Label(self.lf_scale, text=self._t("scale_not_set"))
         self.scale_label.pack(anchor=tk.W)
+
+        unit_frame = ttk.Frame(self.lf_scale)
+        unit_frame.pack(fill=tk.X, pady=(4, 0))
+        self.display_unit_label = ttk.Label(unit_frame,
+                                             text=self._t("display_unit") + ":")
+        self.display_unit_label.pack(side=tk.LEFT)
+        self.display_unit_var = tk.StringVar(value=self.display_unit)
+        self.display_unit_combo = ttk.Combobox(
+            unit_frame, textvariable=self.display_unit_var,
+            values=SUPPORTED_UNITS, width=6, state="readonly")
+        self.display_unit_combo.pack(side=tk.LEFT, padx=5)
+        self.display_unit_combo.bind("<<ComboboxSelected>>",
+                                      self._on_display_unit_change)
 
         self.lf_list = ttk.LabelFrame(parent, text=self._t("meas_list"), padding=4)
         self.lf_list.pack(fill=tk.BOTH, expand=True, padx=4, pady=2)
@@ -1572,6 +1769,7 @@ class NanoMeasurer(tk.Tk):
         self.btn_dist.config(text=self._t("distribution"))
         self.btn_csv.config(text=self._t("export_csv"))
         self.btn_color.config(text=self._t("color_analysis"))
+        self.btn_group.config(text=self._t("group_select"))
         self.btn_fit.config(text=self._t("fit_window"))
 
         # 刷新菜单文本（子菜单项）
@@ -1585,7 +1783,8 @@ class NanoMeasurer(tk.Tk):
         self.tools_menu.entryconfig(0, label=self._t("set_scale"))
         self.tools_menu.entryconfig(1, label=self._t("measure"))
         self.tools_menu.entryconfig(2, label=self._t("distribution"))
-        self.tools_menu.entryconfig(4, label=self._t("color_analysis"))
+        self.tools_menu.entryconfig(3, label=self._t("group_select"))
+        self.tools_menu.entryconfig(5, label=self._t("color_analysis"))
 
         self.about_menu.entryconfig(0, label=self._t("menu_help"))
         self.about_menu.entryconfig(2, label=self._t("menu_feedback"))
@@ -1600,7 +1799,8 @@ class NanoMeasurer(tk.Tk):
 
         self.lf_list.config(text=self._t("meas_list"))
         self.tree.heading("col_id", text=self._t("col_id"))
-        self.tree.heading("col_diameter", text=self._t("col_diameter", u=self.unit))
+        self.tree.heading("col_diameter", text=self._t("col_diameter", u=self.display_unit))
+        self.display_unit_label.config(text=self._t("display_unit") + ":")
         self.btn_del.config(text=self._t("delete_sel"))
         self.btn_clear.config(text=self._t("clear_all"))
 
@@ -1614,7 +1814,8 @@ class NanoMeasurer(tk.Tk):
         return {"idle": self._t("mode_idle"),
                 "set_scale": self._t("mode_scale"),
                 "measure": self._t("mode_measure"),
-                "pick_color": self._t("mode_pick_color")}.get(self.mode, "")
+                "pick_color": self._t("mode_pick_color"),
+                "group_select": self._t("mode_group")}.get(self.mode, "")
 
     # --------------------------------------------------------- 快捷键
     def _bind_shortcuts(self):
@@ -1662,7 +1863,11 @@ class NanoMeasurer(tk.Tk):
 
         self.measurements.clear()
         self.undo_stack.clear()
+        self.groups.clear()
         self.scale = 0.0
+        self.unit = "nm"
+        self.display_unit = "nm"
+        self.display_unit_var.set("nm")
         self.click_pt = None
         self.mode = "idle"
         self.scale_label.config(text=self._t("scale_not_set"))
@@ -1801,9 +2006,27 @@ class NanoMeasurer(tk.Tk):
                 self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
                                         fill="#FF3333", outline="", tags="overlay")
             mx, my = (cx1 + cx2) / 2, (cy1 + cy2) / 2
-            label = f"{m.nm_dist:.2f} nm" if self.scale > 0 else f"{m.pixel_dist:.1f} px"
+            if self.scale > 0:
+                dv = self._display_value(m.nm_dist)
+                label = f"{dv:.2f} {self.display_unit}"
+            else:
+                label = f"{m.pixel_dist:.1f} px"
             self.canvas.create_text(mx, my - 10, text=label,
                                     fill="#FFFF00", font=("Arial", 9, "bold"), tags="overlay")
+
+        # 分组矩形
+        group_colors = ["#00FF00", "#00CCFF", "#FF9900", "#FF00FF",
+                        "#FFFF00", "#00FFCC", "#FF6666", "#9966FF"]
+        for gi, g in enumerate(self.groups):
+            color = group_colors[gi % len(group_colors)]
+            gx1, gy1 = self._img_to_canvas(g.x1, g.y1)
+            gx2, gy2 = self._img_to_canvas(g.x2, g.y2)
+            self.canvas.create_rectangle(gx1, gy1, gx2, gy2,
+                                         outline=color, width=2,
+                                         dash=(6, 3), tags="overlay")
+            self.canvas.create_text(gx1 + 4, gy1 + 4, text=g.name,
+                                    anchor=tk.NW, fill=color,
+                                    font=("Arial", 10, "bold"), tags="overlay")
 
         # 取色标记
         if self.mode == "pick_color" and self._pick_color_points:
@@ -1831,6 +2054,51 @@ class NanoMeasurer(tk.Tk):
             self._handle_measure_click(ix, iy)
         elif self.mode == "pick_color":
             self._handle_pick_color(ix, iy)
+        elif self.mode == "group_select":
+            self._group_drag_start = (ix, iy)
+
+    def _on_left_drag(self, event):
+        if self.mode == "group_select" and self._group_drag_start is not None:
+            self.canvas.delete("group_rect")
+            cx1, cy1 = self._img_to_canvas(*self._group_drag_start)
+            cx2, cy2 = event.x, event.y
+            self.canvas.create_rectangle(cx1, cy1, cx2, cy2,
+                                         outline="#00FF00", width=2,
+                                         dash=(6, 4), tags="group_rect")
+
+    def _on_left_release(self, event):
+        if self.mode == "group_select" and self._group_drag_start is not None:
+            ix, iy = self._canvas_to_img(event.x, event.y)
+            ix = max(0, min(ix, self.img_w - 1))
+            iy = max(0, min(iy, self.img_h - 1))
+            sx, sy = self._group_drag_start
+            self._group_drag_start = None
+            self.canvas.delete("group_rect")
+
+            if abs(ix - sx) < 3 and abs(iy - sy) < 3:
+                return  # too small
+
+            # Count measurements in this rectangle
+            temp_group = MeasurementGroup("", sx, sy, ix, iy)
+            count = sum(1 for m in self.measurements
+                        if temp_group.contains_measurement(m))
+            if count == 0:
+                messagebox.showinfo(self._t("warn"), self._t("group_empty"))
+                return
+
+            # Ask for group name
+            default_name = f"G{len(self.groups) + 1}"
+            name = simpledialog.askstring(
+                self._t("group_select"),
+                self._t("group_name_prompt"),
+                initialvalue=default_name, parent=self)
+            if not name:
+                return
+
+            g = MeasurementGroup(name, sx, sy, ix, iy)
+            self.groups.append(g)
+            self._render()
+            self.status_var.set(self._t("group_created", name=name, n=count))
 
     def _on_motion(self, event):
         if self.pil_image is None:
@@ -1853,7 +2121,8 @@ class NanoMeasurer(tk.Tk):
             p1x, p1y = self.click_pt
             dist_px = math.hypot(ix - p1x, iy - p1y)
             if self.mode == "measure" and self.scale > 0:
-                dist_text = f"{dist_px * self.scale:.2f} nm"
+                dv = self._display_value(dist_px * self.scale)
+                dist_text = f"{dv:.2f} {self.display_unit}"
             else:
                 dist_text = f"{dist_px:.1f} px"
             mid_x, mid_y = (cx1 + cx2) / 2, (cy1 + cy2) / 2
@@ -1899,6 +2168,8 @@ class NanoMeasurer(tk.Tk):
                 return
 
             self.unit = dlg.result_unit
+            self.display_unit = dlg.result_unit
+            self.display_unit_var.set(dlg.result_unit)
             self.scale = dlg.result / dist_px
             self.scale_label.config(text=self._t("scale_fmt", v=self.scale, u=self.unit))
             self._update_column_header()
@@ -1916,7 +2187,19 @@ class NanoMeasurer(tk.Tk):
 
     def _update_column_header(self):
         """更新列表标题以显示当前单位"""
-        self.tree.heading("col_diameter", text=self._t("col_diameter", u=self.unit))
+        self.tree.heading("col_diameter",
+                          text=self._t("col_diameter", u=self.display_unit))
+
+    def _display_value(self, calib_value):
+        """将校准单位的值转换为当前显示单位。"""
+        return convert_length(calib_value, self.unit, self.display_unit)
+
+    def _on_display_unit_change(self, event=None):
+        """用户切换显示单位时的回调。"""
+        self.display_unit = self.display_unit_var.get()
+        self._update_column_header()
+        self._refresh_list()
+        self._render()
 
     # --------------------------------------------------------- 粒径测量
     def start_measure(self):
@@ -1929,6 +2212,18 @@ class NanoMeasurer(tk.Tk):
         self.mode = "measure"
         self.click_pt = None
         self.status_var.set(self._t("meas_click1"))
+        self.canvas.config(cursor="crosshair")
+
+    def start_group_select(self):
+        if self.pil_image is None:
+            messagebox.showwarning(self._t("warn"), self._t("no_image"))
+            return
+        if not self.measurements:
+            messagebox.showwarning(self._t("warn"), self._t("no_data"))
+            return
+        self.mode = "group_select"
+        self._group_drag_start = None
+        self.status_var.set(self._t("group_hint"))
         self.canvas.config(cursor="crosshair")
 
     def _handle_measure_click(self, ix, iy):
@@ -1952,7 +2247,8 @@ class NanoMeasurer(tk.Tk):
             self.canvas.delete("rubber")
             n_meas = len(self.measurements)
             self.status_var.set(self._t("meas_recorded",
-                                        n=n_meas, d=m.nm_dist, u=self.unit))
+                                        n=n_meas, d=self._display_value(m.nm_dist),
+                                        u=self.display_unit))
             if n_meas % 50 == 0:
                 messagebox.showinfo(self._t("hist_title"),
                                     self._t("meas_50_reached", n=n_meas))
@@ -2006,7 +2302,11 @@ class NanoMeasurer(tk.Tk):
     def _refresh_list(self):
         self.tree.delete(*self.tree.get_children())
         for i, m in enumerate(self.measurements, 1):
-            val = f"{m.nm_dist:.2f}" if self.scale > 0 else f"{m.pixel_dist:.1f} px"
+            if self.scale > 0:
+                dv = self._display_value(m.nm_dist)
+                val = f"{dv:.2f}"
+            else:
+                val = f"{m.pixel_dist:.1f} px"
             self.tree.insert("", tk.END, iid=str(i), values=(i, val))
 
         n = len(self.measurements)
@@ -2014,9 +2314,12 @@ class NanoMeasurer(tk.Tk):
             self.stat_label.config(text=f'{self._t("count")}: 0')
             return
 
-        vals = ([m.nm_dist for m in self.measurements] if self.scale > 0
-                else [m.pixel_dist for m in self.measurements])
-        unit = "nm" if self.scale > 0 else "px"
+        if self.scale > 0:
+            vals = [self._display_value(m.nm_dist) for m in self.measurements]
+            unit = self.display_unit
+        else:
+            vals = [m.pixel_dist for m in self.measurements]
+            unit = "px"
         mean = np.mean(vals)
         std = np.std(vals, ddof=1) if n > 1 else 0.0
         self.stat_label.config(
@@ -2074,8 +2377,10 @@ class NanoMeasurer(tk.Tk):
         self.mode = "idle"
         self.click_pt = None
         self._pick_color_points = []
+        self._group_drag_start = None
         self.canvas.config(cursor="")
         self.canvas.delete("rubber")
+        self.canvas.delete("group_rect")
         self._render()
         self.status_var.set(self._t("cancelled"))
 
@@ -2085,10 +2390,13 @@ class NanoMeasurer(tk.Tk):
             messagebox.showwarning(self._t("warn"), self._t("no_data"))
             return
 
-        vals = np.array([m.nm_dist for m in self.measurements])
-        unit = "nm" if self.scale > 0 else "px"
-        if self.scale <= 0:
+        if self.scale > 0:
+            vals = np.array([self._display_value(m.nm_dist)
+                             for m in self.measurements])
+            unit = self.display_unit
+        else:
             vals = np.array([m.pixel_dist for m in self.measurements])
+            unit = "px"
 
         n = len(vals)
         mean = np.mean(vals)
@@ -2141,53 +2449,16 @@ class NanoMeasurer(tk.Tk):
         if not path:
             return
 
-        unit = "nm" if self.scale > 0 else "px"
-        vals = [m.nm_dist if self.scale > 0 else m.pixel_dist for m in self.measurements]
+        group_labels = assign_groups(self.measurements, self.groups)
 
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f)
-                writer.writerow(["#", self._t("csv_diameter", u=unit),
-                                 self._t("csv_pixel_dist"),
-                                 "X1", "Y1", "X2", "Y2"])
-                for i, m in enumerate(self.measurements, 1):
-                    d = m.nm_dist if self.scale > 0 else m.pixel_dist
-                    writer.writerow([i, f"{d:.4f}", f"{m.pixel_dist:.4f}",
-                                     f"{m.x1:.2f}", f"{m.y1:.2f}",
-                                     f"{m.x2:.2f}", f"{m.y2:.2f}"])
-
-                writer.writerow([])
-                writer.writerow([self._t("csv_stat"), self._t("csv_value")])
-                n = len(vals)
-                mean = np.mean(vals)
-                std_val = np.std(vals, ddof=1) if n > 1 else 0.0
-                writer.writerow([self._t("csv_count"), n])
-                writer.writerow([self._t("csv_mean"), f"{mean:.4f}"])
-                writer.writerow([self._t("csv_std"), f"{std_val:.4f}"])
-                writer.writerow([self._t("csv_min"), f"{min(vals):.4f}"])
-                writer.writerow([self._t("csv_max"), f"{max(vals):.4f}"])
-                if self.scale > 0:
-                    writer.writerow([self._t("csv_scale"), f"{self.scale:.6f}"])
-
-                # ---- 高斯拟合 ----
-                if n > 1 and std_val > 0:
-                    writer.writerow([])
-                    writer.writerow([self._t("csv_gauss_title")])
-                    writer.writerow([self._t("csv_gauss_formula"),
-                                     "f(x) = (1/(σ√(2π))) × exp(-(x-μ)²/(2σ²))"])
-                    writer.writerow([self._t("csv_gauss_mu"), f"{mean:.4f}"])
-                    writer.writerow([self._t("csv_gauss_sigma"), f"{std_val:.4f}"])
-
-                    writer.writerow([])
-                    vals_arr = np.array(vals)
-                    x_fit = np.linspace(vals_arr.min() - std_val,
-                                        vals_arr.max() + std_val, 200)
-                    y_fit = norm.pdf(x_fit, mean, std_val)
-                    writer.writerow([self._t("csv_gauss_curve")])
-                    writer.writerow([self._t("csv_gauss_x", u=unit),
-                                     self._t("csv_gauss_y")])
-                    for xv, yv in zip(x_fit, y_fit):
-                        writer.writerow([f"{xv:.4f}", f"{yv:.6f}"])
+                write_csv_with_groups(writer, self.measurements, self.groups,
+                                      group_labels, scale=self.scale,
+                                      lang=self.lang,
+                                      calib_unit=self.unit,
+                                      display_unit=self.display_unit)
 
             self.status_var.set(self._t("exported_fmt", p=path))
         except Exception as exc:
